@@ -147,6 +147,40 @@ describe("per-visit cost cap", () => {
     expect(steps.map((s) => `${s.kind}:${s.name ?? ""}`)).toEqual(["model:", "tool_call:segment_photo", "error:cost_limit"]);
   });
 
+  it("concurrent SAM requests never overshoot the cap: remaining concepts are not fired", async () => {
+    const { visitId, photoId } = await seedVisit();
+    expect(env.SAM_CONCURRENCY).toBe(3);
+    // Spark ($0.004) asks for 5 concepts. Budget left: $0.006 → only 2 SAM requests fit ($0.0075, $0.011).
+    // SAM responses are slow, so with 3 free slots a naive limiter would have 3 requests in flight at once.
+    let inFlight = 0;
+    let maxInFlight = 0;
+    create.mockImplementation(async (body: { model: string }) => {
+      if (body.model !== env.SAM_MODEL) {
+        return sparkToolCall("segment_photo", {
+          photo_id: photoId,
+          concepts: ["concrete column", "brick wall", "concrete slab", "steel rebar", "measuring tape"],
+        });
+      }
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 40));
+      inFlight--;
+      return samNoMatches();
+    });
+
+    await expect(runAgent(visitId)).rejects.toBeInstanceOf(CostLimitError);
+
+    expect(callsTo(env.SAM_MODEL)).toBe(2); // not 3 (the concurrency limit), not 5 (all concepts)
+    expect(maxInFlight).toBe(2); // the two affordable requests did run in parallel
+    const sentConcepts = create.mock.calls
+      .filter(([body]) => body.model === env.SAM_MODEL)
+      .map(([body]) => body.input[0].content[0].text);
+    expect(sentConcepts).toEqual(["concrete column", "brick wall"]);
+    const { run, steps } = await latestRun(visitId);
+    expect(run.costUsd).toBeCloseTo(0.011, 6); // both in-flight requests billed, nothing more
+    expect(steps.map((s) => `${s.kind}:${s.name ?? ""}`)).toEqual(["model:", "tool_call:segment_photo", "error:cost_limit"]);
+  });
+
   it("does not make any call when earlier runs already used the visit's budget", async () => {
     const { visitId } = await seedVisit();
     await db.insert(schema.agentRuns).values({ visitId, status: "needs_input", costUsd: 0.02, finishedAt: new Date() });

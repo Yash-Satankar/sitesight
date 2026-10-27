@@ -8,7 +8,8 @@ import {
 import sharp from "sharp";
 import { env } from "../config.js";
 import { metaClient } from "./client.js";
-import { addRunCost } from "./cost.js";
+import { CostLimitError, createBudgetGate } from "./cost.js";
+import { createLimiter } from "../lib/limit.js";
 import type { SparkInputItem } from "./spark.js";
 import { rasterToFrameMask } from "./masks.js";
 import { withRetry } from "./retry.js";
@@ -26,23 +27,49 @@ export interface Segment {
 
 /**
  * Segment every instance of each concept in the image with SAM 3.1.
- * SAM takes one concept per request (no multi-concept syntax), so this makes one call per concept.
+ * SAM takes one concept per request (no multi-concept syntax), so this makes one call per concept,
+ * up to SAM_CONCURRENCY at a time. Results come back grouped in the order of `concepts`.
  * Caching by (photo_id, concept), including empty results, lives in agent/tools.ts (segment_queries).
  *
- * With `runId`, each request (one image each) adds SAM_USD_PER_IMAGE to agent_runs.cost_usd and
- * throws CostLimitError as soon as the visit goes over MAX_COST_PER_VISIT_USD.
+ * With `runId`, each request (one image each) adds SAM_USD_PER_IMAGE to agent_runs.cost_usd.
+ * The budget is checked before every request is sent, counting in-flight requests as spent, so an
+ * over-budget visit never fires the remaining concepts. Throws CostLimitError in that case.
+ * If any request fails, no new ones are started; in-flight ones finish (and are billed) first.
  */
 export async function segment(image: Buffer, concepts: string[], opts: { runId?: number } = {}): Promise<Segment[]> {
   const { width = 0, height = 0, format } = await sharp(image).metadata();
   const dataUrl = `data:image/${format === "png" ? "png" : "jpeg"};base64,${image.toString("base64")}`;
-  const results: Segment[] = [];
-  for (const concept of concepts) {
-    const outputText = await callSam(dataUrl, concept);
-    // Billed per successful request, including zero-match results.
-    if (opts.runId != null) await addRunCost(opts.runId, { costUsd: env.SAM_USD_PER_IMAGE });
-    results.push(...(await parseSamOutput(outputText, concept, width, height)));
-  }
-  return results;
+  const gate = opts.runId != null ? createBudgetGate(opts.runId, env.SAM_USD_PER_IMAGE) : null;
+  const limit = createLimiter(env.SAM_CONCURRENCY);
+  let stopped = false;
+
+  const settled = await Promise.allSettled(
+    concepts.map((concept) =>
+      limit(async (): Promise<Segment[]> => {
+        if (stopped) return []; // an earlier request failed or the budget ran out
+        try {
+          await gate?.reserve();
+          let outputText: string;
+          try {
+            outputText = await callSam(dataUrl, concept);
+          } catch (err) {
+            await gate?.release(); // failed requests are not billed
+            throw err;
+          }
+          await gate?.settle(); // billed per successful request, including zero-match results
+          return await parseSamOutput(outputText, concept, width, height);
+        } catch (err) {
+          stopped = true;
+          throw err;
+        }
+      }),
+    ),
+  );
+
+  const errors = settled.flatMap((s) => (s.status === "rejected" ? [s.reason as unknown] : []));
+  // Never return a partial result: the caller would cache the missing concepts as "no instances".
+  if (errors.length) throw errors.find((e) => e instanceof CostLimitError) ?? errors[0];
+  return settled.flatMap((s) => (s.status === "fulfilled" ? s.value : []));
 }
 
 /**

@@ -14,6 +14,7 @@ export default defineConfig({
       SAM_USD_PER_IMAGE: "0.0035",
       MAX_COST_PER_VISIT_USD: "0.01",
       MAX_AGENT_STEPS: "10",
+      SAM_CONCURRENCY: "3",
     },
   },
 });
