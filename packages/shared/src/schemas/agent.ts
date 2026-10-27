@@ -15,7 +15,7 @@ export type VisitStatus = z.infer<typeof VisitStatus>;
 export const AgentRunStatus = z.enum(["running", "finished", "needs_input", "failed"]);
 export type AgentRunStatus = z.infer<typeof AgentRunStatus>;
 
-export const AgentStepKind = z.enum(["model", "tool_call", "tool_result"]);
+export const AgentStepKind = z.enum(["model", "tool_call", "tool_result", "error"]);
 export type AgentStepKind = z.infer<typeof AgentStepKind>;
 
 /** One row of agent_steps; also the payload of each SSE event on /visits/:id/trace. */

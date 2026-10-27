@@ -193,7 +193,7 @@ export const agentSteps = pgTable(
       .notNull()
       .references(() => agentRuns.id, { onDelete: "cascade" }),
     idx: integer("idx").notNull(),
-    kind: text("kind", { enum: ["model", "tool_call", "tool_result"] }).notNull(),
+    kind: text("kind", { enum: ["model", "tool_call", "tool_result", "error"] }).notNull(),
     name: text("name"),
     payload: jsonb("payload").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -1,21 +1,16 @@
 import type OpenAI from "openai";
-import { eq, sql as dsql } from "drizzle-orm";
 import type { z } from "zod";
 import { env } from "../config.js";
 import { metaClient } from "./client.js";
-// db/client.js is imported lazily in recordUsage so DB-free scripts (spark-smoke) can use this module.
+import { addRunCost } from "./cost.js";
+
+export { CostLimitError } from "./cost.js";
 
 // Re-exported so agent/ can type its messages without importing the SDK itself.
 export type SparkInputItem = OpenAI.Responses.ResponseInputItem;
 export type SparkTool = OpenAI.Responses.FunctionTool;
 export type SparkResponse = OpenAI.Responses.Response;
 export type SparkFunctionCall = OpenAI.Responses.ResponseFunctionToolCall;
-
-export class CostLimitError extends Error {
-  constructor(public spentUsd: number) {
-    super(`Visit cost $${spentUsd.toFixed(4)} exceeded MAX_COST_PER_VISIT_USD=$${env.MAX_COST_PER_VISIT_USD}`);
-  }
-}
 
 export interface RespondOptions {
   instructions: string;
@@ -38,7 +33,8 @@ export async function respond(opts: RespondOptions): Promise<SparkResponse> {
     tool_choice: opts.tools?.length ? "auto" : undefined,
   });
 
-  if (opts.runId != null) await recordUsage(opts.runId, resp);
+  // Adds tokens + cost to agent_runs and throws CostLimitError if the visit is now over budget.
+  if (opts.runId != null) await addRunCost(opts.runId, estimateCost(resp));
   return resp;
 }
 
@@ -108,27 +104,4 @@ function extractJson(text: string): unknown {
   } catch {
     return undefined;
   }
-}
-
-async function recordUsage(runId: number, resp: SparkResponse) {
-  const { db, schema } = await import("../db/client.js");
-  const { inputTokens: inTok, outputTokens: outTok, costUsd: cost } = estimateCost(resp);
-
-  const [run] = await db
-    .update(schema.agentRuns)
-    .set({
-      inputTokens: dsql`${schema.agentRuns.inputTokens} + ${inTok}`,
-      outputTokens: dsql`${schema.agentRuns.outputTokens} + ${outTok}`,
-      costUsd: dsql`${schema.agentRuns.costUsd} + ${cost}`,
-    })
-    .where(eq(schema.agentRuns.id, runId))
-    .returning({ visitId: schema.agentRuns.visitId });
-  if (!run) return;
-
-  const [total] = await db
-    .select({ spent: dsql<string>`coalesce(sum(${schema.agentRuns.costUsd}), 0)` })
-    .from(schema.agentRuns)
-    .where(eq(schema.agentRuns.visitId, run.visitId));
-  const spent = Number(total?.spent ?? 0);
-  if (spent > env.MAX_COST_PER_VISIT_USD) throw new CostLimitError(spent);
 }

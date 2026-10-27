@@ -8,6 +8,7 @@ import {
 import sharp from "sharp";
 import { env } from "../config.js";
 import { metaClient } from "./client.js";
+import { addRunCost } from "./cost.js";
 import type { SparkInputItem } from "./spark.js";
 import { rasterToFrameMask } from "./masks.js";
 import { withRetry } from "./retry.js";
@@ -27,13 +28,18 @@ export interface Segment {
  * Segment every instance of each concept in the image with SAM 3.1.
  * SAM takes one concept per request (no multi-concept syntax), so this makes one call per concept.
  * Caching by (photo_id, concept), including empty results, lives in agent/tools.ts (segment_queries).
+ *
+ * With `runId`, each request (one image each) adds SAM_USD_PER_IMAGE to agent_runs.cost_usd and
+ * throws CostLimitError as soon as the visit goes over MAX_COST_PER_VISIT_USD.
  */
-export async function segment(image: Buffer, concepts: string[]): Promise<Segment[]> {
+export async function segment(image: Buffer, concepts: string[], opts: { runId?: number } = {}): Promise<Segment[]> {
   const { width = 0, height = 0, format } = await sharp(image).metadata();
   const dataUrl = `data:image/${format === "png" ? "png" : "jpeg"};base64,${image.toString("base64")}`;
   const results: Segment[] = [];
   for (const concept of concepts) {
     const outputText = await callSam(dataUrl, concept);
+    // Billed per successful request, including zero-match results.
+    if (opts.runId != null) await addRunCost(opts.runId, { costUsd: env.SAM_USD_PER_IMAGE });
     results.push(...(await parseSamOutput(outputText, concept, width, height)));
   }
   return results;

@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { env } from "../config.js";
 import { db, schema } from "../db/client.js";
 import { functionCallOutput, functionCalls, outputAsInput, respond, type SparkInputItem } from "../meta/spark.js";
+import { assertWithinBudget, CostLimitError } from "../meta/cost.js";
 import { NUDGE, systemPrompt } from "./prompts.js";
 import { runTool, toolDefs, type ToolContext } from "./tools.js";
 import { Tracer } from "./trace.js";
@@ -28,6 +29,9 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
     let nudged = false;
 
     for (let step = 1; step <= env.MAX_AGENT_STEPS && !finished; step++) {
+      // Don't start a paid call if earlier runs of this visit already used the budget.
+      // spark.respond and sam.segment also throw CostLimitError right after the call that crosses it.
+      await assertWithinBudget(visitId);
       const resp = await respond({ instructions: systemPrompt(), input, tools: toolDefs, runId });
       const calls = functionCalls(resp);
       await tracer.step("model", null, {
@@ -86,6 +90,16 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
     return outcome;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // Make the abort visible in the live trace. Never let a trace failure hide the original error.
+    await tracer
+      .step(
+        "error",
+        err instanceof CostLimitError ? "cost_limit" : "run_failed",
+        err instanceof CostLimitError
+          ? { message, spent_usd: err.spentUsd, limit_usd: err.limitUsd }
+          : { message },
+      )
+      .catch((traceErr) => console.error(`[run ${runId}] could not write error trace step`, traceErr));
     await db
       .update(schema.agentRuns)
       .set({ status: "failed", error: message, finishedAt: new Date() })

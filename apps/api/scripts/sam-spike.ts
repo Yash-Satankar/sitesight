@@ -11,12 +11,12 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
+import { env } from "../src/config.js";
 import { segment } from "../src/meta/sam.js";
 import { normalize } from "../src/services/images.js";
 import { drawMasks } from "../src/services/overlay.js";
 
 const CONCEPTS = ["concrete column", "brick wall", "concrete slab", "steel rebar", "measuring tape"];
-const USD_PER_1K_IMAGES = 2.5;
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const inDir = process.argv[2] ? resolve(process.env.INIT_CWD ?? process.cwd(), process.argv[2]) : join(repoRoot, "samples");
@@ -87,8 +87,10 @@ const errors = rows.filter((r) => r.instances === "ERR");
 console.log(`\n${"-".repeat(78)}`);
 console.log(`total images:     ${files.length} (${imagesProcessed} with at least one successful call)`);
 console.log(`total SAM calls:  ${samCalls} (${errors.length} failed)`);
-console.log(`estimated cost:   $${((files.length * USD_PER_1K_IMAGES) / 1000).toFixed(4)} at $${USD_PER_1K_IMAGES}/1k images`);
-console.log(`                  ($${((samCalls * USD_PER_1K_IMAGES) / 1000).toFixed(4)} if billed per call, since there is one call per concept)`);
+console.log(
+  `estimated cost:   $${(samCalls * env.SAM_USD_PER_IMAGE).toFixed(4)} (${samCalls} requests × SAM_USD_PER_IMAGE=$${env.SAM_USD_PER_IMAGE}, one image per request)`,
+);
+console.log(`                  ($${(files.length * env.SAM_USD_PER_IMAGE).toFixed(4)} if billed once per unique image)`);
 console.log(`overlays:         ${outDir}`);
 if (errors.length) {
   console.log(`\nfirst error: ${errors[0]!.image} / ${errors[0]!.concept}\n  ${errors[0]!.error}`);

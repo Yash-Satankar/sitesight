@@ -4,6 +4,7 @@ import { ToolArgs, TOOL_NAMES, type ToolName, type ScaleReference } from "@sites
 import { env } from "../config.js";
 import { db, schema } from "../db/client.js";
 import type { SparkTool } from "../meta/spark.js";
+import { CostLimitError } from "../meta/cost.js";
 import { segment as samSegment } from "../meta/sam.js";
 import { loadNormalizedPhoto, toDataUrl } from "../services/images.js";
 import { drawMasks } from "../services/overlay.js";
@@ -68,6 +69,8 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolContext): 
     // Each handler receives its own validated args; the cast is safe because of the lookup above.
     return await (handlers[tool] as (a: unknown, c: ToolContext) => Promise<ToolOutcome>)(parsed.data, ctx);
   } catch (err) {
+    // Budget overruns must abort the run, not be handed back to the model as a tool error.
+    if (err instanceof CostLimitError) throw err;
     return { output: { error: err instanceof Error ? err.message : String(err) } };
   }
 }
@@ -153,7 +156,7 @@ const handlers: Handlers = {
 
   async segment_photo({ photo_id, concepts }, ctx) {
     const photo = await getPhoto(photo_id, ctx);
-    const segs = await ensureSegments(photo, concepts);
+    const segs = await ensureSegments(photo, concepts, ctx);
     return {
       output: concepts.map((concept) => {
         const mine = segs.filter((s) => s.concept === concept);
@@ -175,7 +178,7 @@ const handlers: Handlers = {
     if (targets.length !== segment_ids.length) {
       return { output: { error: "Some segment_ids do not belong to this photo." } };
     }
-    const refSegs = await ensureSegments(photo, [REFERENCE_CONCEPT[reference]]);
+    const refSegs = await ensureSegments(photo, [REFERENCE_CONCEPT[reference]], ctx);
     const ref = refSegs.sort((a, b) => b.score - a.score)[0] ?? null;
     const result = measureSegments(targets, reference, ref, photo);
     return {
@@ -310,7 +313,7 @@ async function getPhoto(photoId: number, ctx: ToolContext): Promise<PhotoRow> {
 }
 
 /** Run SAM only for concepts not already queried on this photo; return all segments for `concepts`. */
-async function ensureSegments(photo: PhotoRow, concepts: string[]): Promise<SegmentRow[]> {
+async function ensureSegments(photo: PhotoRow, concepts: string[], ctx: ToolContext): Promise<SegmentRow[]> {
   const done = await db
     .select({ concept: schema.segmentQueries.concept })
     .from(schema.segmentQueries)
@@ -320,7 +323,7 @@ async function ensureSegments(photo: PhotoRow, concepts: string[]): Promise<Segm
 
   if (missing.length) {
     const img = await loadNormalizedPhoto(photo.storageKey);
-    const found = await samSegment(img.buffer, missing);
+    const found = await samSegment(img.buffer, missing, { runId: ctx.runId });
     for (const s of found) {
       const maskKey = newKey(`masks/${photo.id}`, "image/png");
       await putObject(maskKey, s.mask, "image/png");

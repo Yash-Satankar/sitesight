@@ -14,8 +14,10 @@ const Env = z.object({
   SPARK_MODEL: z.string().default("muse-spark-1.3"),
   SAM_MODEL: z.string().default("sam-3.1"),
   VOICE_MODEL: z.string().default("muse-voice-transcribe-1.0"),
-  SPARK_INPUT_USD_PER_MTOK: z.coerce.number().nonnegative().default(0),
-  SPARK_OUTPUT_USD_PER_MTOK: z.coerce.number().nonnegative().default(0),
+  // Prices drive the per-visit cost cap. Validated below; startup fails unless each is > 0.
+  SPARK_INPUT_USD_PER_MTOK: z.string().default(""),
+  SPARK_OUTPUT_USD_PER_MTOK: z.string().default(""),
+  SAM_USD_PER_IMAGE: z.string().default(""),
 
   // Agent tunables
   MAX_AGENT_STEPS: z.coerce.number().int().positive().default(25),
@@ -44,7 +46,22 @@ if (!parsed.success) {
   process.exit(1);
 }
 
-export const env = parsed.data;
+// Prices must be set and positive, or the cost cap silently never triggers.
+const PRICE_KEYS = ["SPARK_INPUT_USD_PER_MTOK", "SPARK_OUTPUT_USD_PER_MTOK", "SAM_USD_PER_IMAGE"] as const;
+const prices = {} as Record<(typeof PRICE_KEYS)[number], number>;
+for (const key of PRICE_KEYS) {
+  const raw = parsed.data[key].trim();
+  const value = Number(raw);
+  if (!raw || !Number.isFinite(value) || value <= 0) {
+    console.error(
+      `${key}=${raw ? JSON.stringify(raw) : "(missing)"} must be a positive number in USD (copy it from the Meta pricing page). Refusing to start.`,
+    );
+    process.exit(1);
+  }
+  prices[key] = value;
+}
+
+export const env = { ...parsed.data, ...prices };
 export type Env = typeof env;
 
 // The Meta model ids must never be a "-contributor" variant (those allow training on request data).

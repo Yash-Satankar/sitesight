@@ -3,7 +3,7 @@ import { z } from "zod";
 import { env } from "../config.js";
 import { db, schema, sql } from "../db/client.js";
 import { runAgent } from "../agent/run.js";
-import { CostLimitError } from "../meta/spark.js";
+import { CostLimitError } from "../meta/cost.js";
 import { transcribe } from "../meta/voice.js";
 import { getObject } from "../services/storage.js";
 import { claimNext, releaseStale, type Job } from "../services/jobs.js";

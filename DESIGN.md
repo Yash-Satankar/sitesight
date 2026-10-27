@@ -288,6 +288,11 @@ SPARK_MODEL=muse-spark-1.3
 SAM_MODEL=sam-3.1
 VOICE_MODEL=muse-voice-transcribe-1.0
 
+# Pricing (USD) — REQUIRED, must be > 0 or the API/worker refuse to start. Copy from the Meta pricing page.
+SPARK_INPUT_USD_PER_MTOK=
+SPARK_OUTPUT_USD_PER_MTOK=
+SAM_USD_PER_IMAGE=0.0025
+
 # Agent tunables
 MAX_AGENT_STEPS=25
 MAX_COST_PER_VISIT_USD=1.50
