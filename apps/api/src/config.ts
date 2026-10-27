@@ -12,7 +12,7 @@ const Env = z.object({
   META_API_KEY: z.string().default(""),
   META_BASE_URL: z.string().default(""),
   SPARK_MODEL: z.string().default("muse-spark-1.3"),
-  SAM_MODEL: z.string().default("sam-3-1"),
+  SAM_MODEL: z.string().default("sam-3.1"),
   VOICE_MODEL: z.string().default("muse-voice-transcribe-1.0"),
   SPARK_INPUT_USD_PER_MTOK: z.coerce.number().nonnegative().default(0),
   SPARK_OUTPUT_USD_PER_MTOK: z.coerce.number().nonnegative().default(0),

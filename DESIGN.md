@@ -285,7 +285,7 @@ Request and response bodies are defined in `packages/shared/src/schemas/api.ts` 
 META_API_KEY=
 META_BASE_URL=               # copy from Meta dashboard
 SPARK_MODEL=muse-spark-1.3
-SAM_MODEL=sam-3-1
+SAM_MODEL=sam-3.1
 VOICE_MODEL=muse-voice-transcribe-1.0
 
 # Agent tunables

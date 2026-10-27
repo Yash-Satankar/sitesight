@@ -2,8 +2,8 @@ import type OpenAI from "openai";
 import { eq, sql as dsql } from "drizzle-orm";
 import type { z } from "zod";
 import { env } from "../config.js";
-import { db, schema } from "../db/client.js";
 import { metaClient } from "./client.js";
+// db/client.js is imported lazily in recordUsage so DB-free scripts (spark-smoke) can use this module.
 
 // Re-exported so agent/ can type its messages without importing the SDK itself.
 export type SparkInputItem = OpenAI.Responses.ResponseInputItem;
@@ -46,6 +46,38 @@ export function functionCalls(resp: SparkResponse): SparkFunctionCall[] {
   return resp.output.filter((o): o is SparkFunctionCall => o.type === "function_call");
 }
 
+/**
+ * Items to append to `input` before the next turn: everything the model produced
+ * (reasoning, messages, function_call items) so the conversation stays intact.
+ */
+export function outputAsInput(resp: SparkResponse): SparkInputItem[] {
+  return resp.output as SparkInputItem[];
+}
+
+/** The tool result item for a function_call. `call_id` must match the call it answers. */
+export function functionCallOutput(call: SparkFunctionCall, output: unknown): SparkInputItem {
+  return {
+    type: "function_call_output",
+    call_id: call.call_id,
+    output: typeof output === "string" ? output : JSON.stringify(output),
+  };
+}
+
+export interface UsageCost {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+/** Tokens and estimated USD cost of one response, using SPARK_*_USD_PER_MTOK. */
+export function estimateCost(resp: SparkResponse): UsageCost {
+  const inputTokens = resp.usage?.input_tokens ?? 0;
+  const outputTokens = resp.usage?.output_tokens ?? 0;
+  const costUsd =
+    (inputTokens * env.SPARK_INPUT_USD_PER_MTOK + outputTokens * env.SPARK_OUTPUT_USD_PER_MTOK) / 1_000_000;
+  return { inputTokens, outputTokens, costUsd };
+}
+
 /** Ask Spark for JSON matching `schema`. One repair attempt if the output fails validation. */
 export async function respondJson<S extends z.ZodTypeAny>(
   schema: S,
@@ -79,10 +111,8 @@ function extractJson(text: string): unknown {
 }
 
 async function recordUsage(runId: number, resp: SparkResponse) {
-  const inTok = resp.usage?.input_tokens ?? 0;
-  const outTok = resp.usage?.output_tokens ?? 0;
-  const cost =
-    (inTok * env.SPARK_INPUT_USD_PER_MTOK + outTok * env.SPARK_OUTPUT_USD_PER_MTOK) / 1_000_000;
+  const { db, schema } = await import("../db/client.js");
+  const { inputTokens: inTok, outputTokens: outTok, costUsd: cost } = estimateCost(resp);
 
   const [run] = await db
     .update(schema.agentRuns)

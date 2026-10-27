@@ -1,52 +1,113 @@
 /**
- * DAY 1 spike: run SAM 3.1 on real site photos and save masks + overlays to disk.
+ * DAY 1 spike: run SAM 3.1 on site photos, save mask overlays, and print a quality/latency table.
  *
- *   pnpm sam-spike <photo-dir> [concept ...]
- *   pnpm sam-spike ../../samples/photos "concrete column" "brick wall"
+ *   pnpm sam-spike                  # every .jpg/.png/.webp in samples/
+ *   pnpm sam-spike path/to/folder
  *
- * Output goes to apps/api/spike-out/. Use it to decide go/no-go on segmentation quality.
- * Needs META_API_KEY + META_BASE_URL, and meta/sam.ts wired to the real API shape.
+ * Overlays go to samples/out/<image>__<concept>.png (gitignored with the rest of samples/).
+ * Needs META_API_KEY + META_BASE_URL. No database required.
  */
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import sharp from "sharp";
 import { segment } from "../src/meta/sam.js";
 import { normalize } from "../src/services/images.js";
 import { drawMasks } from "../src/services/overlay.js";
 
-const [dirArg, ...conceptArgs] = process.argv.slice(2);
-if (!dirArg) {
-  console.error("usage: pnpm sam-spike <photo-dir> [concept ...]");
+const CONCEPTS = ["concrete column", "brick wall", "concrete slab", "steel rebar", "measuring tape"];
+const USD_PER_1K_IMAGES = 2.5;
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const inDir = process.argv[2] ? resolve(process.env.INIT_CWD ?? process.cwd(), process.argv[2]) : join(repoRoot, "samples");
+const outDir = join(repoRoot, "samples", "out");
+
+const files = (await readdir(inDir, { withFileTypes: true }))
+  .filter((d) => d.isFile() && /\.(jpe?g|png|webp)$/i.test(d.name))
+  .map((d) => d.name)
+  .sort();
+if (!files.length) {
+  console.error(`No images found in ${inDir}`);
   process.exit(1);
 }
-const concepts = conceptArgs.length ? conceptArgs : ["concrete column", "brick wall", "A4 sheet of paper"];
-const outDir = resolve("spike-out");
-
-const files = (await readdir(resolve(dirArg))).filter((f) => /\.(jpe?g|png|webp)$/i.test(f)).slice(0, 20);
 await mkdir(outDir, { recursive: true });
-console.log(`Segmenting ${files.length} photos for: ${concepts.join(", ")}`);
+console.log(`SAM spike: ${files.length} image(s) from ${inDir}\nconcepts: ${CONCEPTS.join(", ")}\n`);
 
-const summary: Record<string, Record<string, number>> = {};
+interface Row {
+  image: string;
+  concept: string;
+  instances: number | "ERR";
+  meanScore: number | null;
+  ms: number;
+  error?: string;
+}
+const rows: Row[] = [];
+let samCalls = 0;
+
 for (const file of files) {
   const name = basename(file, extname(file));
-  const started = Date.now();
+  let img: Awaited<ReturnType<typeof normalize>>;
   try {
-    const img = await normalize(await readFile(join(resolve(dirArg), file)));
-    const segs = await segment(img.buffer, concepts);
-    summary[file] = Object.fromEntries(concepts.map((c) => [c, segs.filter((s) => s.concept === c).length]));
-
-    for (const s of segs) {
-      await writeFile(join(outDir, `${name}__${s.concept.replace(/\W+/g, "_")}_${s.instanceIdx}.png`), s.mask);
-    }
-    const overlay = await drawMasks(
-      img.buffer,
-      segs.map((s) => ({ mask: s.mask, bbox: s.bbox, label: `${s.concept} ${s.score.toFixed(2)}` })),
-    );
-    await writeFile(join(outDir, `${name}__overlay.jpg`), overlay);
-    console.log(`✓ ${file} (${Date.now() - started} ms)`, summary[file]);
+    img = await normalize(await readFile(join(inDir, file)));
   } catch (err) {
-    console.error(`✗ ${file}:`, err instanceof Error ? err.message : err);
+    rows.push({ image: file, concept: "(load)", instances: "ERR", meanScore: null, ms: 0, error: String(err) });
+    continue;
+  }
+
+  for (const concept of CONCEPTS) {
+    const started = Date.now();
+    samCalls++;
+    try {
+      const segs = await segment(img.buffer, [concept]);
+      const ms = Date.now() - started;
+      const overlay = await drawMasks(
+        img.buffer,
+        segs.map((s) => ({ mask: s.mask, bbox: s.bbox, label: `${concept} #${s.instanceIdx} ${s.score.toFixed(2)}` })),
+      );
+      await writeFile(join(outDir, `${name}__${slug(concept)}.png`), await sharp(overlay).png().toBuffer());
+      const meanScore = segs.length ? segs.reduce((a, s) => a + s.score, 0) / segs.length : null;
+      rows.push({ image: file, concept, instances: segs.length, meanScore, ms });
+    } catch (err) {
+      rows.push({
+        image: file,
+        concept,
+        instances: "ERR",
+        meanScore: null,
+        ms: Date.now() - started,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    printRow(rows[rows.length - 1]!);
   }
 }
 
-await writeFile(join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
-console.log(`Done. See ${outDir}`);
+// ---- summary ----
+const imagesProcessed = new Set(rows.filter((r) => r.instances !== "ERR").map((r) => r.image)).size;
+const errors = rows.filter((r) => r.instances === "ERR");
+console.log(`\n${"-".repeat(78)}`);
+console.log(`total images:     ${files.length} (${imagesProcessed} with at least one successful call)`);
+console.log(`total SAM calls:  ${samCalls} (${errors.length} failed)`);
+console.log(`estimated cost:   $${((files.length * USD_PER_1K_IMAGES) / 1000).toFixed(4)} at $${USD_PER_1K_IMAGES}/1k images`);
+console.log(`                  ($${((samCalls * USD_PER_1K_IMAGES) / 1000).toFixed(4)} if billed per call, since there is one call per concept)`);
+console.log(`overlays:         ${outDir}`);
+if (errors.length) {
+  console.log(`\nfirst error: ${errors[0]!.image} / ${errors[0]!.concept}\n  ${errors[0]!.error}`);
+}
+
+function printRow(r: Row) {
+  if (rows.length === 1) {
+    console.log(`${pad("image", 28)} | ${pad("concept", 16)} | ${pad("instances", 9)} | ${pad("mean score", 10)} | ms`);
+    console.log(`${"-".repeat(28)}-+-${"-".repeat(16)}-+-${"-".repeat(9)}-+-${"-".repeat(10)}-+------`);
+  }
+  console.log(
+    `${pad(r.image, 28)} | ${pad(r.concept, 16)} | ${pad(String(r.instances), 9)} | ${pad(r.meanScore == null ? "—" : r.meanScore.toFixed(2), 10)} | ${r.ms}`,
+  );
+}
+
+function pad(s: string, n: number) {
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s.padEnd(n);
+}
+
+function slug(s: string) {
+  return s.replace(/\W+/g, "_");
+}

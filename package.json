@@ -2,7 +2,9 @@
   "name": "sitesight",
   "private": true,
   "packageManager": "pnpm@10.34.6",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "pnpm -r --parallel --filter ./apps/** dev",
     "dev:api": "pnpm --filter @sitesight/api dev",
@@ -13,7 +15,8 @@
     "db:generate": "pnpm --filter @sitesight/api db:generate",
     "db:migrate": "pnpm --filter @sitesight/api db:migrate",
     "seed": "pnpm --filter @sitesight/api seed",
-    "sam-spike": "pnpm --filter @sitesight/api sam-spike"
+    "sam-spike": "pnpm --filter @sitesight/api sam-spike",
+    "spark-smoke": "pnpm --filter @sitesight/api spark-smoke"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

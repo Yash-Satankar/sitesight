@@ -1,7 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { env } from "../config.js";
 import { db, schema } from "../db/client.js";
-import { functionCalls, respond, type SparkInputItem } from "../meta/spark.js";
+import { functionCallOutput, functionCalls, outputAsInput, respond, type SparkInputItem } from "../meta/spark.js";
 import { NUDGE, systemPrompt } from "./prompts.js";
 import { runTool, toolDefs, type ToolContext } from "./tools.js";
 import { Tracer } from "./trace.js";
@@ -35,7 +35,8 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
         tool_calls: calls.map((c) => ({ name: c.name, arguments: c.arguments })),
         usage: resp.usage,
       });
-      input.push(...(resp.output as SparkInputItem[]));
+      // Keep reasoning + function_call items in the conversation (same as scripts/spark-smoke.ts check 3).
+      input.push(...outputAsInput(resp));
 
       if (calls.length === 0) {
         if (nudged) throw new Error("Model stopped calling tools after a nudge.");
@@ -49,7 +50,8 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
         await tracer.step("tool_call", call.name, safeJson(call.arguments));
         const outcome = await runTool(call.name, call.arguments, ctx);
         await tracer.step("tool_result", call.name, outcome.output);
-        input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(outcome.output) });
+        // Every call_id must get an output before the next turn, even after `finish`.
+        input.push(functionCallOutput(call, outcome.output));
         if (outcome.images) pendingImages.push(...outcome.images);
         if (outcome.done) finished = true;
       }
