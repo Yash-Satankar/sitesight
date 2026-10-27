@@ -1,0 +1,33 @@
+import { z } from "zod";
+
+export const Unit = z.enum(["nos", "m2", "m3", "rmt", "kg"]);
+export type Unit = z.infer<typeof Unit>;
+
+export const MeasureMode = z.enum(["count", "area", "visual_only"]);
+export type MeasureMode = z.infer<typeof MeasureMode>;
+
+/** A BOQ line item as produced by the parser or edited by the engineer. */
+export const BoqItemInput = z.object({
+  zoneId: z.number().int().nullable().default(null),
+  code: z.string().min(1),
+  description: z.string().min(1),
+  unit: Unit,
+  plannedQty: z.number().nonnegative(),
+  measureMode: MeasureMode,
+  samConcepts: z.array(z.string().min(1)).max(5).default([]),
+  sequenceNo: z.number().int().nullable().default(null),
+});
+export type BoqItemInput = z.infer<typeof BoqItemInput>;
+
+export const BoqItem = BoqItemInput.extend({
+  id: z.number().int(),
+  projectId: z.number().int(),
+});
+export type BoqItem = z.infer<typeof BoqItem>;
+
+/** What Muse Spark must return when parsing raw BOQ rows. */
+export const BoqParseResult = z.object({
+  items: z.array(BoqItemInput.omit({ zoneId: true })),
+  warnings: z.array(z.string()).default([]),
+});
+export type BoqParseResult = z.infer<typeof BoqParseResult>;

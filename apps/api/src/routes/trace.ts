@@ -1,0 +1,60 @@
+import { Router } from "express";
+import { and, asc, eq, gt } from "drizzle-orm";
+import type { AgentStep } from "@sitesight/shared";
+import { db, schema } from "../db/client.js";
+import { intParam } from "../lib/http.js";
+import { getVisitOr404 } from "../lib/queries.js";
+
+export const traceRouter = Router();
+
+const POLL_MS = 700;
+
+/**
+ * SSE stream of agent_steps for a visit. The agent runs in the worker process,
+ * so this tails the table instead of listening to an in-memory emitter.
+ * Events: "step" (AgentStep) and "status" ({ status }). Resumes from Last-Event-ID.
+ */
+traceRouter.get("/visits/:id/trace", async (req, res) => {
+  const visitId = intParam(req.params.id);
+  await getVisitOr404(visitId);
+
+  res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+  res.flushHeaders();
+
+  let lastId = Number(req.get("Last-Event-ID") ?? req.query.after ?? 0) || 0;
+  let lastStatus = "";
+  let closed = false;
+  req.on("close", () => (closed = true));
+
+  while (!closed) {
+    const rows = await db
+      .select({ step: schema.agentSteps })
+      .from(schema.agentSteps)
+      .innerJoin(schema.agentRuns, eq(schema.agentRuns.id, schema.agentSteps.runId))
+      .where(and(eq(schema.agentRuns.visitId, visitId), gt(schema.agentSteps.id, lastId)))
+      .orderBy(asc(schema.agentSteps.id))
+      .limit(200);
+
+    for (const { step } of rows) {
+      const evt: AgentStep = {
+        id: step.id,
+        runId: step.runId,
+        idx: step.idx,
+        kind: step.kind,
+        name: step.name,
+        payload: step.payload,
+        createdAt: step.createdAt.toISOString(),
+      };
+      res.write(`id: ${step.id}\nevent: step\ndata: ${JSON.stringify(evt)}\n\n`);
+      lastId = step.id;
+    }
+
+    const [v] = await db.select({ status: schema.visits.status }).from(schema.visits).where(eq(schema.visits.id, visitId));
+    if (v && v.status !== lastStatus) {
+      lastStatus = v.status;
+      res.write(`event: status\ndata: ${JSON.stringify({ status: v.status })}\n\n`);
+    }
+    if (!rows.length) res.write(": ping\n\n");
+    await new Promise((r) => setTimeout(r, POLL_MS));
+  }
+});
