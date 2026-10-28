@@ -1,0 +1,41 @@
+{
+  "items": [
+    {
+      "code": "PB-1",
+      "description": "Plinth beam 230 x 450 mm, RCC M25",
+      "unit": "m3",
+      "plannedQty": 9.5,
+      "measureMode": "visual_only",
+      "segmentTargets": [],
+      "sequenceNo": 1
+    },
+    {
+      "code": "GF-1",
+      "description": "RCC columns, ground floor, 300 x 450 mm",
+      "unit": "nos",
+      "plannedQty": 16,
+      "measureMode": "count",
+      "segmentTargets": ["column"],
+      "sequenceNo": 2
+    },
+    {
+      "code": "RF-1",
+      "description": "Roof slab casting, 150 mm thick, RCC M25",
+      "unit": "m3",
+      "plannedQty": 36,
+      "measureMode": "visual_only",
+      "segmentTargets": [],
+      "sequenceNo": 3
+    },
+    {
+      "code": "GF-2",
+      "description": "Brickwork 230 mm in CM 1:6, ground floor",
+      "unit": "m2",
+      "plannedQty": 180,
+      "measureMode": "area",
+      "segmentTargets": ["brickwork"],
+      "panelPlannedQty": 12.5,
+      "sequenceNo": 4
+    }
+  ]
+}

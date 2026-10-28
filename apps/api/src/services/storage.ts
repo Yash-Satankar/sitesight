@@ -1,10 +1,22 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../config.js";
 
 // The bucket is private. Browsers only ever see short-lived presigned URLs.
+// With STORAGE_LOCAL_DIR set (scripts, local dev), objects are files under that folder instead and R2 is never used.
 let client: S3Client | null = null;
+
+function localPath(key: string): string | null {
+  if (!env.STORAGE_LOCAL_DIR) return null;
+  const root = resolve(env.STORAGE_LOCAL_DIR);
+  const path = resolve(root, key);
+  if (!path.startsWith(root + sep)) throw new Error(`Storage key escapes STORAGE_LOCAL_DIR: ${key}`);
+  return path;
+}
 
 function s3(): S3Client {
   if (!env.R2_ACCOUNT_ID || !env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY) {
@@ -35,21 +47,32 @@ export function newKey(prefix: string, contentType: string): string {
 }
 
 export async function presignPut(key: string, contentType: string, expiresIn = 600): Promise<string> {
+  if (localPath(key)) throw new Error("Browser uploads need R2; presigned PUT is not available with STORAGE_LOCAL_DIR.");
   return getSignedUrl(s3(), new PutObjectCommand({ Bucket: env.R2_BUCKET, Key: key, ContentType: contentType }), {
     expiresIn,
   });
 }
 
 export async function presignGet(key: string, expiresIn = 3600): Promise<string> {
+  const local = localPath(key);
+  if (local) return pathToFileURL(local).href;
   return getSignedUrl(s3(), new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }), { expiresIn });
 }
 
 export async function getObject(key: string): Promise<Buffer> {
+  const local = localPath(key);
+  if (local) return readFile(local);
   const res = await s3().send(new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }));
   if (!res.Body) throw new Error(`Empty object: ${key}`);
   return Buffer.from(await res.Body.transformToByteArray());
 }
 
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
+  const local = localPath(key);
+  if (local) {
+    await mkdir(dirname(local), { recursive: true });
+    await writeFile(local, body);
+    return;
+  }
   await s3().send(new PutObjectCommand({ Bucket: env.R2_BUCKET, Key: key, Body: body, ContentType: contentType }));
 }

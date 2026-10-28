@@ -34,6 +34,8 @@ const Env = z.object({
   R2_ACCESS_KEY_ID: z.string().default(""),
   R2_SECRET_ACCESS_KEY: z.string().default(""),
   R2_BUCKET: z.string().default("sitesight"),
+  // Store objects as files under this folder instead of R2 (scripts like agent-dry-run, local dev).
+  STORAGE_LOCAL_DIR: z.string().default(""),
   WEB_ORIGIN: z.string().default("http://localhost:5173"),
 
   // Worker

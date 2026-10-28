@@ -38,14 +38,27 @@ pnpm dev:web      # http://localhost:5173 (also exposed on your LAN for phone te
 Camera capture on a phone needs HTTPS (or localhost). For on-device testing use the deployed web app,
 or a tunnel such as `cloudflared tunnel --url http://localhost:5173`.
 
-## Day-1 SAM spike
+## SAM spike
 
 ```sh
-pnpm sam-spike ../../samples/photos "concrete column" "brick wall" "A4 sheet of paper"
+pnpm sam-spike --concepts "brickwork,exposed brick wall" --dir samples/site-a [--min-score 0.5]
 ```
 
-Writes masks and overlays to `apps/api/spike-out/`. The SAM 3.1 wire format is not confirmed yet:
-implement `callSam` in [apps/api/src/meta/sam.ts](apps/api/src/meta/sam.ts) first.
+Writes overlays and a `run-<time>.json` summary to `samples/out/` (gitignored).
+
+## Agent dry run
+
+Runs the real agent loop against Meta on a folder of photos, with no Docker, API server, worker or R2:
+
+```sh
+pnpm agent-dry-run --photos samples/site-a --boq samples/boq-demo.json
+```
+
+- Each subfolder of `--photos` becomes a zone; photos directly in the folder form one zone. A `<photo>.txt` next to a photo is used as its voice-note transcript.
+- `--boq` takes JSON (see [samples/boq-demo.json](samples/boq-demo.json)) or an `.xlsx`, which Muse Spark parses first.
+- Uses an in-memory database (`DATABASE_URL=pglite:memory`) and local file storage (`STORAGE_LOCAL_DIR`), both set by the script.
+- Streams every trace step with the running cost, then prints a results table, photo requests, total steps and cost. Masks and a full JSON report go to `samples/out/dry-run-<time>/`.
+- Spend is capped by `MAX_COST_PER_VISIT_USD` in `.env`.
 
 ## Rules
 
