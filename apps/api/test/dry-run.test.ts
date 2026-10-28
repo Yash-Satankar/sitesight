@@ -87,7 +87,8 @@ const SCRIPT: ((b: Body) => unknown)[] = [
   (b) =>
     call("request_photo", {
       zone_id: context(b).zones.find((z: { name: string }) => z.name === "GF-West").zone_id,
-      instruction: "Photograph the west bay brickwork square-on from about 4 m away.",
+      boq_item_id: (toolOutputs(b)[0] as { boq_item_id: number; code: string }[]).find((i) => i.code === "GF-2")!.boq_item_id,
+      instruction: "Square-on photo of the whole bay between columns C3 and C4, including the beam above and the plinth below.",
       reason: "Brickwork extent not visible in the current photo.",
     }),
   () => call("finish", { summary: "Columns assessed; brickwork needs a photo." }),
@@ -140,10 +141,11 @@ describe("agent dry run", () => {
     expect(text).toMatch(/cost so far \$0\.\d{4} \/ \$0\.0100/);
 
     // Results
-    expect(text).toMatch(/BOQ item +\| % done \| qty_done +\| conf\. \| evidence photos \| rationale/);
-    expect(text).toMatch(/GF-1 RCC columns, ground floor.*\| 25% +\| — +\| 0\.72 +\| \d+ +\| 4 of 16 ground-floor columns/);
-    expect(text).toMatch(/PB-1 Plinth beam.*\| — .*\(not assessed\)/);
-    expect(text).toMatch(/\[open\] GF-West: Photograph the west bay brickwork square-on from about 4 m away\./);
+    expect(text).toMatch(/BOQ item +\| status +\| % done \| qty_done +\| conf\. \| evidence +\| rationale/);
+    expect(text).toMatch(/GF-1 RCC columns, ground.*\| assessed +\| 25% +\| — +\| 0\.72 +\| \d+ +\| 4 of 16 ground-floor columns/);
+    expect(text).toMatch(/PB-1 Plinth beam.*\| not assessed +\| — /);
+    expect(text).toMatch(/GF-2 Brickwork.*\| awaiting photo \(ask-back #\d+\) +\| — .*\| requested: Square-on photo of the whole bay/);
+    expect(text).toMatch(/\[open\] #\d+ GF-West \(for GF-2\): Square-on photo of the whole bay between columns C3 and C4/);
     expect(text).toMatch(/Total steps: \d+ {3}Total cost: \$0\.0049/); // 7 Spark calls × $0.0002 + 1 SAM request × $0.0035
 
     expect(summary).toMatchObject({ outcome: "needs_input", error: null });
@@ -153,6 +155,13 @@ describe("agent dry run", () => {
 
     const report = JSON.parse(await readFile(join(outDir, "dry-run.json"), "utf8"));
     expect(report.assessments[0].rationale).toBe("4 of 16 ground-floor columns cast in the east bay photo.");
+    const askId = summary.askBacks[0]!.id;
+    expect(report.items.map((i: { code: string; status: string }) => [i.code, i.status])).toEqual([
+      ["PB-1", "not assessed"],
+      ["GF-1", "assessed"],
+      ["RF-1", "not assessed"],
+      ["GF-2", `awaiting photo (ask-back #${askId})`],
+    ]);
   });
 
   it("refuses BOQ items that name a zone with no photo folder", async () => {

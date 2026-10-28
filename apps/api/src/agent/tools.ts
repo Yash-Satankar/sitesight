@@ -28,6 +28,8 @@ export interface ToolContext {
   runId: number;
   visitId: number;
   projectId: number;
+  /** draw_panel previews per photo in this run (created on first use). */
+  panelPreviews?: Map<number, number>;
 }
 
 export interface ToolOutcome {
@@ -43,6 +45,14 @@ export interface ToolOutcome {
 
 /** Max long edge of overlay images (masks / panel) sent to the model. */
 export const OVERLAY_MAX_EDGE_PX = 1280;
+
+/** Area items assessed by eye (no panel measurement) are capped at this confidence. */
+export const UNMEASURED_AREA_MAX_CONFIDENCE = 0.5;
+
+/** draw_panel previews per photo per run; after this the model must measure or move on. */
+export const MAX_PANEL_PREVIEWS = 2;
+
+const MEASURING_TOOL_WORDS = /\b(tape|measuring|ruler|scale bar|A4|sheet of paper|paper sheet|laser|meter stick|metre stick)\b/i;
 
 /** zod issues as "decisions[1].reason: required …" strings. */
 export function formatIssues(error: z.ZodError): string[] {
@@ -65,17 +75,17 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     "List BOQ items (optionally for one zone) with unit, planned_qty, measure_mode and segment_targets (what segment_photo can find for the item).",
   list_photos: "List photos in this visit (optionally for one zone) with transcript and whether segments exist.",
   view_photo:
-    "Look at a photo. with_masks=true overlays this photo's masks, each labelled #<segment_id> <target>; rejected segments are hidden. draw_panel outlines a measurement panel (same format as measure's panel) so you can check it before measuring.",
+    `Look at a photo. with_masks=true overlays this photo's masks, each labelled #<segment_id> <target> <score>; rejected segments are hidden. draw_panel outlines a measurement panel (same format as measure's panel) so you can check it before measuring; at most ${MAX_PANEL_PREVIEWS} previews per photo. Only the latest image of each photo stays in the conversation.`,
   segment_photo: `Run SAM 3.1 on a photo for measure targets (${SegmentTarget.options.join(", ")}). Returns instances per target with segment ids, areas and scores. Cached. Every instance must then be checked with view_photo(with_masks=true) + verify_segments before measure.`,
   verify_segments:
     "Verify one photo per call, covering all its segments: one decision (keep or reject) for EVERY unverified segment of that photo, after viewing it with with_masks=true. Calls that leave any unverified segment out are refused and save nothing. Rejections need a reason (what it actually is); keeps with a low score need a specific visual reason. measure only accepts kept (verified) segments.",
   measure:
-    "Pure code, no model; verified segments only. mode='panel' (preferred for area items): fraction of a wall panel covered by target_segment_ids, where panel is the space between two verified columns (left_column_id, right_column_id, top_y, bottom_y) or a 4-point polygon. Returns measurement_id for record_assessment. mode='reference': count + approximate m² from a scale object (A4/tape/brick) visible in the photo.",
+    "Pure code, no model; verified segments only. mode='panel' (area items): fraction of ONE bay's full designed wall area covered by target_segment_ids. The panel is the whole bay: between two cast columns (left_column_id, right_column_id) from the top of the plinth (bottom_y) to the underside of the beam/slab above (top_y), or the same area as a 4-point polygon. Never draw it around the existing masonry only. If the beam/slab or the columns of the bay are not visible or not built, do not use panel mode. One measurement per bay; returns measurement_id for record_assessment. mode='reference': count + approximate m² from a scale object that happens to be visible.",
   get_previous_assessment: "Get the last engineer-accepted assessment of a BOQ item from an earlier visit.",
   record_assessment:
-    "Record (or overwrite) the progress assessment for one BOQ item in this visit, with evidence. For area items measured in panel mode pass panel_measurement_id: qty_done is then computed by code (fraction × the item's panel_planned_qty, or planned_qty); do not calculate it yourself.",
+    `Record (or overwrite) the progress assessment for one BOQ item in this visit, with evidence. You give percent_complete; code computes qty_done (any qty_done you pass is ignored except for count items): area items measured in panel mode → pass panel_measurement_ids (one per bay), qty_done = sum of fractions × panel_planned_qty, capped at planned_qty; visual estimates → percent_complete × planned_qty. Area items without a panel measurement are capped at confidence ${UNMEASURED_AREA_MAX_CONFIDENCE}. Set deviation when the visible material or work differs from the BOQ spec.`,
   request_photo:
-    "Ask the site engineer for a specific extra photo when confidence is low. The instruction must be physically specific and doable in 30 seconds.",
+    "Ask the site engineer for one extra photo when confidence is low. It must be doable with only a phone in 30 seconds, e.g. \"square-on photo of the whole bay between columns C3 and C4, including the beam above and the plinth below\". Never ask for tapes, A4 sheets or any measuring tool.",
   finish: "End the run with a short summary once all relevant items are assessed or have an open photo request.",
 };
 
@@ -181,6 +191,19 @@ const handlers: Handlers = {
 
   async view_photo({ photo_id, with_masks, draw_panel }, ctx) {
     const photo = await getPhoto(photo_id, ctx);
+    let previewNumber = 0;
+    if (draw_panel) {
+      const previews = (ctx.panelPreviews ??= new Map());
+      previewNumber = (previews.get(photo.id) ?? 0) + 1;
+      if (previewNumber > MAX_PANEL_PREVIEWS) {
+        return {
+          output: {
+            error: `Panel preview limit reached for photo ${photo.id} (${MAX_PANEL_PREVIEWS} previews). Call measure(mode='panel') with your best panel now, or record a visual estimate (confidence ≤ ${UNMEASURED_AREA_MAX_CONFIDENCE}) and move on.`,
+          },
+        };
+      }
+      previews.set(photo.id, previewNumber);
+    }
     const img = await loadNormalizedPhoto(photo.storageKey);
     let buffer = img.buffer;
     let legend: { segment_id: number; target: string; score: number; verified: boolean | null }[] = [];
@@ -207,6 +230,9 @@ const handlers: Handlers = {
         share_of_image: Math.round((panel.areaPx / (panel.width * panel.height)) * 1000) / 1000,
         clipped: panel.clipped,
         warnings: panel.warnings,
+        ...(previewNumber >= MAX_PANEL_PREVIEWS
+          ? { note: `Last panel preview for photo ${photo.id}: measure with this panel (or adjust once more inside measure), or move on.` }
+          : {}),
       };
     }
 
@@ -441,39 +467,74 @@ const handlers: Handlers = {
 
     let confidence = args.confidence;
     const notes: string[] = [];
-    if (item.measureMode === "visual_only" && confidence > env.VISUAL_ONLY_MAX_CONFIDENCE) {
-      confidence = env.VISUAL_ONLY_MAX_CONFIDENCE;
-      notes.push(`Confidence capped at ${confidence} for visual_only items.`);
-    }
+    const capConfidence = (max: number, why: string) => {
+      if (confidence > max) {
+        confidence = max;
+        notes.push(`Confidence capped at ${max} ${why}.`);
+      }
+    };
+    if (item.measureMode === "visual_only") capConfidence(env.VISUAL_ONLY_MAX_CONFIDENCE, "for visual_only items");
 
-    // Panel measurement: the quantity comes from the stored fraction, never from the model's arithmetic.
+    // Quantities are computed by code, never by the model's arithmetic:
+    //   panel measurements → Σ fraction × panel_planned_qty; visual estimates → percent × planned_qty.
     let qtyDone = args.qty_done ?? null;
     let qtyBasis: string | null = null;
-    let panelEvidence: { photoId: number; segmentIds: number[] } | null = null;
-    if (args.panel_measurement_id != null) {
-      const [pm] = await db.select().from(schema.panelMeasurements).where(eq(schema.panelMeasurements.id, args.panel_measurement_id));
-      if (!pm || pm.visitId !== ctx.visitId) {
-        return { output: { error: `panel_measurement_id ${args.panel_measurement_id} is not a measurement from this visit.` } };
-      }
+    const panelEvidence: { photo_id: number; segment_ids: number[] }[] = [];
+    const ignoreModelQty = (how: string) => {
+      if (args.qty_done != null && args.qty_done !== qtyDone) notes.push(`qty_done ${args.qty_done} was ignored; it is computed ${how}.`);
+    };
+    const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+    const panelIds = [...new Set([...(args.panel_measurement_ids ?? []), ...(args.panel_measurement_id != null ? [args.panel_measurement_id] : [])])];
+    if (panelIds.length) {
       if (item.measureMode !== "area") {
         return { output: { error: `Panel measurements apply to area items; ${item.code} is measured as ${item.measureMode}.` } };
       }
+      const pms = await db.select().from(schema.panelMeasurements).where(inArray(schema.panelMeasurements.id, panelIds));
+      const foreign = panelIds.filter((id) => !pms.some((p) => p.id === id && p.visitId === ctx.visitId));
+      if (foreign.length) {
+        return { output: { error: `panel_measurement_id ${foreign.join(", ")} is not a measurement from this visit.` } };
+      }
+      const seen = new Map<string, number>();
+      for (const p of pms) {
+        const key = `${p.photoId}:${JSON.stringify(p.panel)}`;
+        if (seen.has(key)) {
+          return { output: { error: `Measurements ${seen.get(key)} and ${p.id} are the same panel on photo ${p.photoId}; pass one measurement per bay.` } };
+        }
+        seen.set(key, p.id);
+      }
+      if (pms.length > 1 && item.panelPlannedQty == null) {
+        return {
+          output: {
+            error: `${item.code} has no panel_planned_qty, so several bays cannot be added up (each would count as the whole item). Pass one measurement, or record a visual estimate.`,
+          },
+        };
+      }
       const basis = item.panelPlannedQty ?? item.plannedQty;
-      qtyDone = Math.round(pm.fraction * basis * 1000) / 1000;
-      qtyBasis = `${pm.fraction} × ${basis} ${item.unit} (${item.panelPlannedQty != null ? "panel_planned_qty" : "planned_qty"}) = ${qtyDone} ${item.unit}`;
+      const fractions = pms.map((p) => p.fraction);
+      const sum = fractions.reduce((a, b) => a + b, 0);
+      const raw = round3(sum * basis);
+      qtyDone = Math.min(raw, item.plannedQty);
+      const terms = fractions.length > 1 ? `(${fractions.join(" + ")})` : String(fractions[0]);
+      qtyBasis = `${terms} × ${basis} ${item.unit} (${item.panelPlannedQty != null ? "panel_planned_qty" : "planned_qty"}) = ${raw} ${item.unit}`;
+      if (raw > item.plannedQty) qtyBasis += `, capped at planned_qty ${item.plannedQty} ${item.unit}`;
       if (item.panelPlannedQty == null) {
         notes.push(`${item.code} has no panel_planned_qty, so the panel was taken as the whole item (${item.plannedQty} ${item.unit}).`);
       }
-      if (args.qty_done != null && args.qty_done !== qtyDone) {
-        notes.push(`qty_done ${args.qty_done} was ignored; it is computed from the panel measurement.`);
-      }
+      ignoreModelQty("from the panel measurements");
       if (item.plannedQty > 0) {
         const implied = (qtyDone / item.plannedQty) * 100;
         if (Math.abs(args.percent_complete - implied) > 10) {
           notes.push(`percent_complete ${args.percent_complete} differs from the ${Math.round(implied)}% implied by qty_done; check it.`);
         }
       }
-      panelEvidence = { photoId: pm.photoId, segmentIds: pm.targetSegmentIds };
+      panelEvidence.push(...pms.map((p) => ({ photo_id: p.photoId, segment_ids: p.targetSegmentIds })));
+    } else if (item.measureMode === "visual_only" || item.measureMode === "area") {
+      // Visual estimate (visual_only, or an area item whose bay could not be measured).
+      if (item.measureMode === "area") capConfidence(UNMEASURED_AREA_MAX_CONFIDENCE, "for area items without a panel measurement");
+      qtyDone = round3((Math.min(100, args.percent_complete) / 100) * item.plannedQty);
+      qtyBasis = `${Math.min(100, args.percent_complete)}% × ${item.plannedQty} ${item.unit} (planned_qty) = ${qtyDone} ${item.unit}`;
+      ignoreModelQty("as percent_complete × planned_qty");
     }
 
     const values = {
@@ -494,10 +555,7 @@ const handlers: Handlers = {
         .returning({ id: schema.assessments.id });
       await tx.delete(schema.assessmentEvidence).where(eq(schema.assessmentEvidence.assessmentId, a!.id));
       const merged = new Map<number, Set<number>>();
-      const evidence = [
-        ...args.evidence,
-        ...(panelEvidence ? [{ photo_id: panelEvidence.photoId, segment_ids: panelEvidence.segmentIds }] : []),
-      ];
+      const evidence = [...args.evidence, ...panelEvidence];
       for (const e of evidence) {
         const set = merged.get(e.photo_id) ?? new Set<number>();
         e.segment_ids.forEach((id) => set.add(id));
@@ -517,6 +575,15 @@ const handlers: Handlers = {
   },
 
   async request_photo(args, ctx) {
+    // Engineers on site have a phone, not a measuring kit: requests needing tools go unanswered.
+    const tools = `${args.instruction} ${args.reason}`.match(MEASURING_TOOL_WORDS);
+    if (tools) {
+      return {
+        output: {
+          error: `Ask-backs must be doable with only a phone; do not ask for "${tools[0]}" or any measuring tool. Ask for a framing instead, e.g. "square-on photo of the whole bay between columns C3 and C4, including the beam above and the plinth below".`,
+        },
+      };
+    }
     const [zone] = await db
       .select()
       .from(schema.zones)

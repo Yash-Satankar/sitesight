@@ -15,6 +15,7 @@ export default defineConfig({
       MAX_COST_PER_VISIT_USD: "0.01",
       MAX_AGENT_STEPS: "10",
       SAM_CONCURRENCY: "3",
+      MAX_IMAGES_IN_CONTEXT: "3",
     },
   },
 });

@@ -15,12 +15,14 @@
       "unit": "nos",
       "plannedQty": 16,
       "measureMode": "count",
-      "segmentTargets": ["column"],
+      "segmentTargets": [
+        "column"
+      ],
       "sequenceNo": 2
     },
     {
       "code": "RF-1",
-      "description": "Roof slab casting, 150 mm thick, RCC M25",
+      "description": "Ground-floor roof slab (first-floor slab), 125 mm, RCC M20",
       "unit": "m3",
       "plannedQty": 36,
       "measureMode": "visual_only",
@@ -33,7 +35,9 @@
       "unit": "m2",
       "plannedQty": 180,
       "measureMode": "area",
-      "segmentTargets": ["brickwork"],
+      "segmentTargets": [
+        "brickwork"
+      ],
       "panelPlannedQty": 12.5,
       "sequenceNo": 4
     }

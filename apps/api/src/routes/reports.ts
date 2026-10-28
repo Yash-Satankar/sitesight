@@ -7,6 +7,7 @@ import { getVisitOr404, loadAssessments } from "../lib/queries.js";
 import { loadNormalizedPhoto } from "../services/images.js";
 import { drawMasks } from "../services/overlay.js";
 import { buildReport, type ReportItem } from "../services/report.js";
+import { pendingItems } from "../lib/item-status.js";
 import { getObject, newKey, presignGet, putObject } from "../services/storage.js";
 
 export const reportsRouter = Router();
@@ -16,7 +17,11 @@ reportsRouter.post("/visits/:id/report", async (req, res) => {
   const visit = await getVisitOr404(visitId);
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, visit.projectId));
   const items = await db.select().from(schema.boqItems).where(eq(schema.boqItems.projectId, visit.projectId));
-  const confirmed = (await loadAssessments(visitId)).filter((a) => a.status !== "proposed");
+  const allAssessments = await loadAssessments(visitId);
+  const confirmed = allAssessments.filter((a) => a.status !== "proposed");
+  // Items still waiting for a requested photo are listed in their own section of the report.
+  const askBacks = await db.select().from(schema.askBacks).where(eq(schema.askBacks.visitId, visitId));
+  const pending = pendingItems(items, new Set(allAssessments.map((a) => a.boqItemId)), askBacks);
   if (!confirmed.length) throw new HttpError(409, "Accept or edit at least one assessment before generating a report");
 
   const photoIds = [...new Set(confirmed.flatMap((a) => a.evidence.map((e) => e.photoId)))];
@@ -63,6 +68,7 @@ reportsRouter.post("/visits/:id/report", async (req, res) => {
     locationLabel: project!.locationLabel,
     visitDate: visit.visitDate,
     items: reportItems,
+    pending,
   });
   const storageKey = newKey(`visits/${visitId}/reports`, "application/pdf");
   await putObject(storageKey, pdf, "application/pdf");

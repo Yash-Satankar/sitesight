@@ -136,7 +136,12 @@ export const ToolArgs = {
       .number()
       .int()
       .optional()
-      .describe("From measure(mode='panel'). qty_done is then computed by code; do not supply it."),
+      .describe("From measure(mode='panel'), for a single bay. Prefer panel_measurement_ids."),
+    panel_measurement_ids: z
+      .array(z.number().int())
+      .min(1)
+      .optional()
+      .describe("One measure(mode='panel') result per bay. qty_done = sum of fractions × panel_planned_qty, computed by code."),
     confidence: z.number().min(0).max(1),
     rationale: z.string().min(1),
     evidence: z

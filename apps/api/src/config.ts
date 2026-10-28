@@ -26,6 +26,7 @@ const Env = z.object({
   MAX_IMAGE_EDGE_PX: z.coerce.number().int().positive().default(1600),
   VISUAL_ONLY_MAX_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.7),
   SAM_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(3), // parallel SAM requests per segment() call
+  MAX_IMAGES_IN_CONTEXT: z.coerce.number().int().min(1).default(3), // images kept in the agent conversation (oldest dropped)
 
   // Infra
   PORT: z.coerce.number().int().default(8787),

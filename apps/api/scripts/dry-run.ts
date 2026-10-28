@@ -11,6 +11,7 @@ import { onTraceStep } from "../src/agent/trace.js";
 import { visitSpendUsd } from "../src/meta/cost.js";
 import { parseBoq } from "../src/services/boq-parser.js";
 import { boqItemProblem } from "../src/services/boq-rules.js";
+import { boqItemStatus } from "../src/lib/item-status.js";
 import { normalize } from "../src/services/images.js";
 import { newKey, putObject } from "../src/services/storage.js";
 import { formatTable } from "./spike-lib.js";
@@ -27,8 +28,10 @@ export interface DryRunSummary {
   outcome: "assessed" | "needs_input" | "partial" | "failed";
   error: string | null;
   visitId: number;
+  /** Every BOQ item with its status, e.g. "assessed" or "awaiting photo (ask-back #3)". */
+  items: { code: string; description: string; status: string; openAskBackIds: number[] }[];
   assessments: { code: string; percentComplete: number; qtyDone: number | null; confidence: number; photoIds: number[]; rationale: string }[];
-  askBacks: { zone: string; instruction: string; reason: string; status: string }[];
+  askBacks: { id: number; zone: string; boqCode: string | null; instruction: string; reason: string; status: string }[];
   steps: number;
   costUsd: number;
 }
@@ -110,25 +113,32 @@ export async function runDryRun(opts: DryRunOptions): Promise<DryRunSummary> {
   const items = await db.select().from(schema.boqItems).where(eq(schema.boqItems.projectId, project!.id)).orderBy(schema.boqItems.id);
   out(
     formatTable(
-      ["BOQ item", "% done", "qty_done", "conf.", "evidence photos", "rationale"],
-      [34, 6, 12, 5, 15, 60],
+      ["BOQ item", "status", "% done", "qty_done", "conf.", "evidence", "rationale"],
+      [30, 28, 6, 12, 5, 9, 50],
       items.map((it) => {
         const a = summary.assessments.find((x) => x.code === it.code);
-        if (!a) return [`${it.code} ${it.description}`, "—", "—", "—", "—", "(not assessed)"];
+        const status = summary.items.find((x) => x.code === it.code)!.status;
+        if (!a) {
+          const ask = summary.askBacks.find((x) => x.boqCode === it.code && x.status === "open");
+          return [`${it.code} ${it.description}`, status, "—", "—", "—", "—", ask ? truncate(`requested: ${ask.instruction}`, 50) : "—"];
+        }
         return [
           `${it.code} ${it.description}`,
+          status,
           `${Math.round(a.percentComplete)}%`,
           a.qtyDone == null ? "—" : `${a.qtyDone} ${it.unit}`,
           a.confidence.toFixed(2),
           a.photoIds.join(", ") || "—",
-          truncate(a.rationale, 60),
+          truncate(a.rationale, 50),
         ];
       }),
     ),
   );
   if (summary.askBacks.length) {
     out("\nPhoto requests (ask-backs):");
-    for (const ab of summary.askBacks) out(`  [${ab.status}] ${ab.zone}: ${ab.instruction}\n          why: ${ab.reason}`);
+    for (const ab of summary.askBacks) {
+      out(`  [${ab.status}] #${ab.id} ${ab.zone}${ab.boqCode ? ` (for ${ab.boqCode})` : ""}: ${ab.instruction}\n          why: ${ab.reason}`);
+    }
   } else {
     out("\nNo photo requests.");
   }
@@ -180,11 +190,23 @@ async function collect(visitId: number, outcome: DryRunSummary["outcome"], error
     .where(eq(schema.askBacks.visitId, visitId))
     .orderBy(schema.askBacks.id);
   const runs = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.visitId, visitId));
+  const [visit] = await db.select().from(schema.visits).where(eq(schema.visits.id, visitId));
+  const items = await db.select().from(schema.boqItems).where(eq(schema.boqItems.projectId, visit!.projectId)).orderBy(schema.boqItems.id);
+  const codeOf = new Map(items.map((i) => [i.id, i.code]));
 
   return {
     outcome,
     error,
     visitId,
+    items: items.map((it) => {
+      const openIds = askBacks.filter(({ ab }) => ab.boqItemId === it.id && ab.status === "open").map(({ ab }) => ab.id);
+      return {
+        code: it.code,
+        description: it.description,
+        status: boqItemStatus(rows.some((r) => r.a.boqItemId === it.id), openIds),
+        openAskBackIds: openIds,
+      };
+    }),
     assessments: rows.map(({ a, code }) => ({
       code,
       percentComplete: a.percentComplete,
@@ -193,7 +215,14 @@ async function collect(visitId: number, outcome: DryRunSummary["outcome"], error
       photoIds: evidence.filter((e) => e.assessmentId === a.id).map((e) => e.photoId),
       rationale: a.rationale,
     })),
-    askBacks: askBacks.map(({ ab, zone }) => ({ zone, instruction: ab.instruction, reason: ab.reason, status: ab.status })),
+    askBacks: askBacks.map(({ ab, zone }) => ({
+      id: ab.id,
+      zone,
+      boqCode: ab.boqItemId != null ? (codeOf.get(ab.boqItemId) ?? null) : null,
+      instruction: ab.instruction,
+      reason: ab.reason,
+      status: ab.status,
+    })),
     steps: runs.reduce((s, r) => s + r.steps, 0),
     costUsd: await visitSpendUsd(visitId),
   };

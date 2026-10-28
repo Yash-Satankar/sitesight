@@ -34,8 +34,8 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
     let finished = false;
     let nudged = false;
     let wrapUpSent = false;
-    // Where each photo's image messages sit in `input`, so they can be swapped for text once verified.
-    const imageMessages = new Map<number, number[]>();
+    // Index in `input` of the one image message kept per photo (older views are replaced by text).
+    const imageMessages = new Map<number, number>();
 
     for (let turn = 1; turn <= maxTurns && !finished; turn++) {
       const turnsLeft = maxTurns - turn + 1;
@@ -55,7 +55,7 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
         tool_calls: calls.map((c) => ({ name: c.name, arguments: c.arguments })),
         usage: resp.usage,
         // Logged per turn to watch context growth (and the effect of image compaction).
-        context: { turn, max_turns: maxTurns, input_items: input.length, images: countImages(imageMessages) },
+        context: { turn, max_turns: maxTurns, input_items: input.length, images: imageMessages.size },
       });
       // Keep reasoning + function_call items in the conversation (same as scripts/spark-smoke.ts check 3).
       input.push(...outputAsInput(resp));
@@ -82,11 +82,18 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
         if (outcome.done) finished = true;
       }
 
-      // Images go in user messages after the tool results (works on any Responses-compatible server),
-      // one message per photo so a photo's images can later be replaced on their own.
+      // Images go in user messages after the tool results (works on any Responses-compatible server).
+      // Image budget: one image per photo (a new view replaces older ones, incl. panel previews) and at
+      // most MAX_IMAGES_IN_CONTEXT overall (oldest dropped). Each removed image leaves a short text note.
+      const trimmed: string[] = [];
       if (!finished) {
         for (const img of pendingImages) {
-          imageMessages.set(img.photoId, [...(imageMessages.get(img.photoId) ?? []), input.length]);
+          const previous = imageMessages.get(img.photoId);
+          if (previous != null) {
+            input[previous] = { role: "user", content: `[photo ${img.photoId}: earlier image removed — a newer view follows]` };
+            trimmed.push(`replaced older image of photo ${img.photoId}`);
+          }
+          imageMessages.set(img.photoId, input.length);
           input.push({
             role: "user",
             content: [
@@ -95,15 +102,23 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
             ],
           });
         }
+        while (imageMessages.size > env.MAX_IMAGES_IN_CONTEXT) {
+          const [photoId, index] = [...imageMessages.entries()].reduce((a, b) => (b[1] < a[1] ? b : a));
+          input[index] = { role: "user", content: `[photo ${photoId}: image dropped to save context — call view_photo again if you need it]` };
+          imageMessages.delete(photoId);
+          trimmed.push(`dropped photo ${photoId} (max ${env.MAX_IMAGES_IN_CONTEXT} images)`);
+        }
       }
+      if (trimmed.length) await tracer.step("notice", "images_trimmed", { message: trimmed.join("; "), images_in_context: imageMessages.size });
 
-      // A fully verified photo's images are no longer needed: keep only a text summary of the decisions.
+      // A fully verified photo's image is no longer needed: keep only a text summary of the decisions.
       // view_photo sends the image again if the model asks for it.
       for (const c of compactions) {
-        const indexes = imageMessages.get(c.photoId) ?? [];
-        for (const i of indexes) input[i] = { role: "user", content: c.placeholder };
+        const index = imageMessages.get(c.photoId);
+        if (index == null) continue;
+        input[index] = { role: "user", content: c.placeholder };
         imageMessages.delete(c.photoId);
-        if (indexes.length) await tracer.step("notice", "context_compacted", { message: c.placeholder, images_removed: indexes.length });
+        await tracer.step("notice", "context_compacted", { message: c.placeholder, images_removed: 1 });
       }
     }
 
@@ -154,12 +169,6 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
       .where(eq(schema.agentRuns.id, runId));
     throw err;
   }
-}
-
-function countImages(imageMessages: Map<number, number[]>): number {
-  let n = 0;
-  for (const indexes of imageMessages.values()) n += indexes.length;
-  return n;
 }
 
 /** Everything the model needs up front: zones, BOQ, photos, prior assessments and ask-back answers. */

@@ -19,12 +19,16 @@ export interface ReportData {
   locationLabel: string;
   visitDate: string;
   items: ReportItem[];
+  /** BOQ items with no assessment yet but an open photo request ("awaiting photo (ask-back #N)"). */
+  pending?: { code: string; description: string; status: string; instruction: string }[];
+  /** For tests: write uncompressed content streams. */
+  compress?: boolean;
 }
 
 /** Bill-ready progress report. Returns the PDF bytes. */
 export function buildReport(data: ReportData): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", margin: 48 });
+    const doc = new PDFDocument({ size: "A4", margin: 48, compress: data.compress ?? true });
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -56,6 +60,18 @@ export function buildReport(data: ReportData): Promise<Buffer> {
           doc.image(img, 48 + i * 170, y, { fit: [160, 120] });
         });
         doc.y = y + 128;
+      }
+      doc.moveDown();
+    }
+
+    if (data.pending?.length) {
+      if (doc.y > 680) doc.addPage();
+      doc.fontSize(13).font("Helvetica-Bold").fillColor("#000").text("Awaiting photos");
+      doc.font("Helvetica").fontSize(10);
+      for (const p of data.pending) {
+        doc.font("Helvetica-Bold").text(`${p.code}  ${p.description}`, { continued: false });
+        doc.font("Helvetica").fillColor("#444").text(`${p.status}. Requested: ${p.instruction}`);
+        doc.fillColor("#000").moveDown(0.5);
       }
       doc.moveDown();
     }

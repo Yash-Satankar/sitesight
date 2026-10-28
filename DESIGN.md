@@ -238,7 +238,8 @@ The first real dry run spent all 25 turns verifying segments one call at a time 
 ### Context compaction
 Images dominate input tokens, and every turn resends the whole conversation. So:
 - Mask/panel overlays from `view_photo` are resized to at most 1280 px on the long edge (plain photos stay at `MAX_IMAGE_EDGE_PX`). When an overlay is shrunk, the tool result says how to convert coordinates back to photo pixels.
-- Once `verify_segments` has decided every segment of a photo, all earlier image messages for that photo are replaced by a placeholder such as `[photo 2 image removed — verified: kept 2, 3, 4; rejected 1 (scaffolding pole). Call view_photo again to see it.]`. A new `view_photo` call sends the image again.
+- **Image budget:** at most one image per photo stays in the conversation — a new `view_photo` (incl. a panel preview) replaces that photo's older image with `[photo N: earlier image removed — a newer view follows]` — and at most `MAX_IMAGES_IN_CONTEXT` (default 3) images overall; beyond that the oldest is dropped with `[photo N: image dropped to save context — call view_photo again if you need it]`. Runs 2 and 3 grew input tokens with repeated previews of the same photo.
+- Once `verify_segments` has decided every segment of a photo, its image message is replaced by a placeholder such as `[photo 2 image removed — verified: kept 2, 3, 4; rejected 1 (scaffolding pole). Call view_photo again to see it.]`. A new `view_photo` call sends the image again.
 - Every model step logs input tokens and images in context (trace payload `context`, worker log, dry-run output) to show the effect.
 
 ### Segment targets (`concepts.ts`)
@@ -269,27 +270,33 @@ SAM also finds things that look like the target: scaffolding poles, trees, steel
 | `verify_segments` | `photo_id`, `decisions: [{segment_id, keep, reason?}]` | kept, rejected, unverified_remaining | Must cover every unverified segment of the photo; reason required to reject; all-or-nothing; triggers context compaction for the photo |
 | `measure` | `photo_id`, `mode: 'panel' | 'reference'`; panel: `target_segment_ids`, `panel`; reference: `segment_ids`, `reference: 'a4' | 'tape_1m' | 'brick'` | panel: `measurement_id`, panel_area_px, covered_area_px, fraction, clipped, warnings. reference: count, area_m2 (approx), scale_confidence | Pure code, no model. Verified segments only. Panel results stored in `panel_measurements` |
 | `get_previous_assessment` | `boq_item_id` | last accepted assessment | |
-| `record_assessment` | `boq_item_id, percent_complete, qty_done?, panel_measurement_id?, confidence, rationale, evidence: [{photo_id, segment_ids}], deviation?` | ok, qty_done, qty_basis | Upsert per visit. With `panel_measurement_id` code computes qty_done (model value ignored) and adds the panel photo + targets to evidence |
-| `request_photo` | `zone_id, boq_item_id?, instruction, reason` | ask_back_id | Instruction must be physically specific |
+| `record_assessment` | `boq_item_id, percent_complete, qty_done?, panel_measurement_ids?, panel_measurement_id?, confidence, rationale, evidence: [{photo_id, segment_ids}], deviation?` | ok, qty_done, qty_basis | Upsert per visit. qty_done is computed by code (panel: Σ fractions × panel_planned_qty; visual: percent × planned_qty); model value used only for count items. Panel photos + targets added to evidence |
+| `request_photo` | `zone_id, boq_item_id?, instruction, reason` | ask_back_id | Must be doable with only a phone ("square-on photo of the whole bay between columns X and Y, including the beam above and the plinth below"); requests mentioning tapes, A4 sheets or measuring tools are refused |
 | `finish` | `summary` | — | Ends run |
 
 ### Measurement approach (`services/measure.ts`)
 - **count** items (columns): verified `column` instances, deduped across photos of the same zone by asking Spark to confirm overlaps.
 - **area** items (brickwork), **panel mode (default)**: measure what fraction of one wall panel is covered, which needs no real-world scale. The day-1 spike found no usable scale reference (no tape or A4 hit in any of 19 photos), so this replaced the reference path as the default.
+  - **A panel is the FULL designed wall area of ONE bay**: between two cast columns, from the top of the plinth (`bottom_y`) to the underside of the beam/slab above (`top_y`). It is never drawn around the existing masonry only (that always gives ~100%). If the bay's beam/slab or columns are not visible or not built yet, panel mode is not used: the agent records a visual estimate, confidence ≤ 0.5 (enforced for area items without a panel measurement), and says why.
+  - At most 2 `draw_panel` previews per photo per run; the second says it is the last, a third is refused with "measure now or move on".
   - Panel = the space between two **verified** `column` segments (x-bounds = each row's inner edges of the two column masks, so leaning columns are followed; y from `top_y` to `bottom_y` in image pixels), or a model-provided 4-point polygon. Pixel rules are shared so both forms agree: columns cover `x ∈ [inner edge L, inner edge R)`, `y ∈ [top_y, bottom_y)`; a polygon covers pixels whose centre is inside it.
   - `covered = |union(target masks) ∩ panel|`, `fraction = covered / panel_area`. `clipped` when the panel ran past the image edge.
   - Warnings: panel < 2% of the image; fraction > 0.98 (panel likely drawn too small); target mask mostly (> 25%) or entirely outside the panel; crossed polygon corners (reordered); columns given right-to-left (swapped).
-  - Workflow: `view_photo(draw_panel)` to check the panel → `measure(mode='panel')` → `record_assessment(panel_measurement_id)`. Code computes `qty_done = fraction × panel_planned_qty` (planned quantity inside one photographed panel, e.g. one brick bay) or `× planned_qty` when the item has none (noted in the result). The model supplies percent_complete only and never does the arithmetic; a model-supplied qty_done is ignored, and a percent far from the implied one is flagged.
+  - Workflow: `view_photo(draw_panel)` to check the panel → `measure(mode='panel')` once per visible bay → `record_assessment(panel_measurement_ids)`. Code computes `qty_done = Σ fraction_i × panel_planned_qty` (planned quantity inside one bay), capped at `planned_qty`. Several bays need `panel_planned_qty`; the same panel twice is refused. A single bay without `panel_planned_qty` uses `planned_qty` (noted in the result). `panel_measurement_id` (single) still works. The model supplies percent_complete only and never does the arithmetic; a model-supplied qty_done is ignored, and a percent far from the implied one is flagged.
   - Limitation: the fraction is in image space, so a panel seen at a steep angle over- or under-weights near/far parts. Ask for a square-on photo when that matters.
 - **area** items, **reference mode (optional)**: segment a reference object (A4 sheet = 0.0624 m², 1 m tape, brick) → px²→m² ratio → apply to verified `brickwork` masks. Ignores perspective, so `scale_confidence` drops if the reference is far from the target or heavily skewed. Only useful when a reference is clearly in shot.
-- **visual_only** items (rebar, slab, plaster, openings, …): Spark judges stage from the image (e.g. "shuttering done, not cast"). Confidence is capped at 0.7.
+- **visual_only** items (rebar, slab, plaster, openings, …): Spark judges stage from the image (e.g. "shuttering done, not cast") and gives percent_complete only; code computes `qty_done = percent/100 × planned_qty` and ignores a model-supplied value. Confidence is capped at 0.7. Area items without a panel measurement get the same percent-based qty, capped at confidence 0.5. Count items keep the model's count.
+- **Material check:** the agent compares the visible material with the BOQ spec (clay brick vs concrete/fly-ash block vs AAC, …); on mismatch it still assesses progress but sets `deviation`.
+- **Floor scoping:** a BOQ item covers only the floor/element it names; work on other floors is not credited to it.
+- **Results:** an item with no assessment but an open ask-back reports `awaiting photo (ask-back #N)` (dry-run table and JSON, PDF "Awaiting photos" section; `lib/item-status.ts`).
 
 ### System prompt principles (`prompts.ts`)
 - You are a site progress auditor. Every claim must cite photo + segment evidence.
 - `segment_photo` only finds the targets above; everything else is visual_only.
 - After segmenting, view the masks and verify every instance; reject scaffolding poles, trees, steel columns, nets/tarps and anything not part of the structure being assessed, with a short reason.
 - Use verified segments + `measure` over eyeballing whenever measure_mode is count/area.
-- If confidence < `ASK_BACK_THRESHOLD`, call `request_photo` with an instruction a site engineer can follow in 30 seconds.
+- If confidence < `ASK_BACK_THRESHOLD`, call `request_photo` with a phone-only instruction a site engineer can follow in 30 seconds; never ask for tapes, A4 sheets or measuring tools.
+- Compare visible materials with the BOQ spec and set `deviation` on mismatch; credit work only to the floor/element an item names.
 - Never invent BOQ items, photo ids or segment ids. Never exceed 100%.
 
 ---
@@ -351,6 +358,7 @@ MAX_COST_PER_VISIT_USD=1.50
 ASK_BACK_THRESHOLD=0.6
 MAX_IMAGE_EDGE_PX=1600
 SAM_CONCURRENCY=3            # parallel SAM requests per segment() call
+MAX_IMAGES_IN_CONTEXT=3      # images kept in the agent conversation; oldest dropped
 
 # Infra
 DATABASE_URL=
@@ -385,7 +393,7 @@ WEB_ORIGIN=http://localhost:5173
 2. **Upload BOQ (15s):** messy Excel → clean items.
 3. **Site visit (30s):** engineer snaps 4 photos on a phone, adds a voice note.
 4. **Agent at work (45s):** live trace: SAM masks appear on columns/brickwork, measurement, assessments land with confidence.
-5. **Ask-back (25s):** "Photograph the east face of column C4 with the tape visible" → upload → confidence jumps.
+5. **Ask-back (25s):** "Square-on photo of the whole bay between columns C3 and C4, including the beam above and the plinth below" → upload → panel measured, confidence jumps.
 6. **Report (20s):** bill-ready PDF with evidence crops.
 7. **Meta stack + impact (25s):** Muse Spark 1.3 + SAM 3.1 + Voice Transcribe (+ built with Muse Code); who it helps and what it costs per visit.
 
