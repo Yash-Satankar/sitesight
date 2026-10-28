@@ -1,11 +1,13 @@
 /**
- * DAY 1 spike: run SAM 3.1 on site photos, save mask overlays, and print a quality/latency table.
+ * DAY 1 spike: run SAM 3.1 on site photos, save mask overlays, and compare prompt variants.
  *
- *   pnpm sam-spike                  # every .jpg/.png/.webp in samples/
- *   pnpm sam-spike path/to/folder
+ *   pnpm sam-spike                                              # default 5 concepts on samples/
+ *   pnpm sam-spike --concepts "brickwork,red brick masonry,exposed brick wall" --dir samples/x
+ *   pnpm sam-spike --min-score 0.5                              # hide low-confidence instances
  *
- * Overlays go to samples/out/<image>__<concept>.png (gitignored with the rest of samples/).
- * Needs META_API_KEY + META_BASE_URL. No database required.
+ * Overlays: samples/out/<image>__<concept-slug>[__min<score>].png, so variant runs don't overwrite each other.
+ * Each run also writes samples/out/run-<timestamp>.json (args, every row, per-concept summary).
+ * samples/ is gitignored. Needs META_API_KEY + META_BASE_URL. No database required.
  */
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -15,34 +17,62 @@ import { env } from "../src/config.js";
 import { segment } from "../src/meta/sam.js";
 import { normalize } from "../src/services/images.js";
 import { drawMasks } from "../src/services/overlay.js";
+import {
+  formatTable,
+  overlayFilename,
+  pad,
+  parseSpikeArgs,
+  splitByScore,
+  summarise,
+  USAGE,
+  type SpikeOptions,
+  type SpikeRow,
+} from "./spike-lib.js";
 
-const CONCEPTS = ["concrete column", "brick wall", "concrete slab", "steel rebar", "measuring tape"];
+let opts: SpikeOptions;
+try {
+  opts = parseSpikeArgs(process.argv.slice(2));
+} catch (err) {
+  console.error(`${err instanceof Error ? err.message : err}\n\n${USAGE}`);
+  process.exit(1);
+}
+if (opts.help) {
+  console.log(USAGE);
+  process.exit(0);
+}
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const inDir = process.argv[2] ? resolve(process.env.INIT_CWD ?? process.cwd(), process.argv[2]) : join(repoRoot, "samples");
+// Relative --dir is resolved from where pnpm was run (INIT_CWD), not from apps/api.
+const inDir = opts.dir ? resolve(process.env.INIT_CWD ?? process.cwd(), opts.dir) : join(repoRoot, "samples");
 const outDir = join(repoRoot, "samples", "out");
 
-const files = (await readdir(inDir, { withFileTypes: true }))
-  .filter((d) => d.isFile() && /\.(jpe?g|png|webp)$/i.test(d.name))
-  .map((d) => d.name)
-  .sort();
+let files: string[];
+try {
+  files = (await readdir(inDir, { withFileTypes: true }))
+    .filter((d) => d.isFile() && /\.(jpe?g|png|webp)$/i.test(d.name))
+    .map((d) => d.name)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+} catch {
+  console.error(`Cannot read folder ${inDir}`);
+  process.exit(1);
+}
 if (!files.length) {
-  console.error(`No images found in ${inDir}`);
+  console.error(`No .jpg/.png/.webp images found in ${inDir}`);
   process.exit(1);
 }
 await mkdir(outDir, { recursive: true });
-console.log(`SAM spike: ${files.length} image(s) from ${inDir}\nconcepts: ${CONCEPTS.join(", ")}\n`);
 
-interface Row {
-  image: string;
-  concept: string;
-  instances: number | "ERR";
-  meanScore: number | null;
-  ms: number;
-  error?: string;
-}
-const rows: Row[] = [];
+console.log(`SAM spike: ${files.length} image(s) from ${inDir}`);
+console.log(`concepts:  ${opts.concepts.map((c) => `"${c}"`).join(", ")}`);
+console.log(`min score: ${opts.minScore}${opts.minScore > 0 ? " (lower instances dropped from table and overlays)" : ""}\n`);
+
+const W = [28, 26, 5, 7, 10, 6];
+console.log(formatTable(["image", "concept", "kept", "dropped", "mean score", "ms"], W, []));
+
+const rows: SpikeRow[] = [];
 let samCalls = 0;
+let instancesSeen = 0;
+let instancesWithScore = 0;
 
 for (const file of files) {
   const name = basename(file, extname(file));
@@ -50,66 +80,88 @@ for (const file of files) {
   try {
     img = await normalize(await readFile(join(inDir, file)));
   } catch (err) {
-    rows.push({ image: file, concept: "(load)", instances: "ERR", meanScore: null, ms: 0, error: String(err) });
+    console.log(`${pad(file, W[0]!)} | could not load: ${err instanceof Error ? err.message : err}`);
     continue;
   }
 
-  for (const concept of CONCEPTS) {
+  for (const concept of opts.concepts) {
     const started = Date.now();
     samCalls++;
+    let row: SpikeRow;
     try {
       const segs = await segment(img.buffer, [concept]);
       const ms = Date.now() - started;
+      instancesSeen += segs.length;
+      instancesWithScore += segs.filter((s) => s.score > 0).length;
+
+      const { kept, dropped } = splitByScore(segs, opts.minScore);
       const overlay = await drawMasks(
         img.buffer,
-        segs.map((s) => ({ mask: s.mask, bbox: s.bbox, label: `${concept} #${s.instanceIdx} ${s.score.toFixed(2)}` })),
+        kept.map((s) => ({ mask: s.mask, bbox: s.bbox, label: `${concept} #${s.instanceIdx} ${s.score.toFixed(2)}` })),
       );
-      await writeFile(join(outDir, `${name}__${slug(concept)}.png`), await sharp(overlay).png().toBuffer());
-      const meanScore = segs.length ? segs.reduce((a, s) => a + s.score, 0) / segs.length : null;
-      rows.push({ image: file, concept, instances: segs.length, meanScore, ms });
+      await writeFile(join(outDir, overlayFilename(name, concept, opts.minScore)), await sharp(overlay).png().toBuffer());
+      row = { image: file, concept, ok: true, kept: kept.length, dropped: dropped.length, scoreSum: kept.reduce((a, s) => a + s.score, 0), ms };
     } catch (err) {
-      rows.push({
+      row = {
         image: file,
         concept,
-        instances: "ERR",
-        meanScore: null,
+        ok: false,
+        kept: 0,
+        dropped: 0,
+        scoreSum: 0,
         ms: Date.now() - started,
         error: err instanceof Error ? err.message : String(err),
-      });
+      };
     }
-    printRow(rows[rows.length - 1]!);
+    rows.push(row);
+    const mean = row.ok && row.kept ? (row.scoreSum / row.kept).toFixed(2) : "—";
+    console.log(
+      [file, concept, row.ok ? String(row.kept) : "ERR", row.ok ? String(row.dropped) : "", mean, String(row.ms)]
+        .map((c, i) => pad(c, W[i]!))
+        .join(" | "),
+    );
   }
 }
 
-// ---- summary ----
-const imagesProcessed = new Set(rows.filter((r) => r.instances !== "ERR").map((r) => r.image)).size;
-const errors = rows.filter((r) => r.instances === "ERR");
+// ---- per-concept summary (compare prompt variants side by side) ----
+const summary = summarise(rows, opts.concepts);
+console.log(`\nPer-concept summary${opts.minScore > 0 ? ` (instances with score ≥ ${opts.minScore})` : ""}`);
+console.log(
+  formatTable(
+    ["concept", "images hit", "instances", "dropped", "mean score", "errors", "avg ms"],
+    [30, 10, 9, 7, 10, 6, 6],
+    summary.map((s) => [
+      s.concept,
+      `${s.imagesWithHit}/${s.imagesOk}`,
+      String(s.instances),
+      String(s.dropped),
+      s.meanScore == null ? "—" : s.meanScore.toFixed(2),
+      String(s.errors),
+      s.meanMs == null ? "—" : String(Math.round(s.meanMs)),
+    ]),
+  ),
+);
+
+const errors = rows.filter((r) => !r.ok);
 console.log(`\n${"-".repeat(78)}`);
-console.log(`total images:     ${files.length} (${imagesProcessed} with at least one successful call)`);
+console.log(`total images:     ${files.length}`);
 console.log(`total SAM calls:  ${samCalls} (${errors.length} failed)`);
 console.log(
   `estimated cost:   $${(samCalls * env.SAM_USD_PER_IMAGE).toFixed(4)} (${samCalls} requests × SAM_USD_PER_IMAGE=$${env.SAM_USD_PER_IMAGE}, one image per request)`,
 );
-console.log(`                  ($${(files.length * env.SAM_USD_PER_IMAGE).toFixed(4)} if billed once per unique image)`);
 console.log(`overlays:         ${outDir}`);
-if (errors.length) {
-  console.log(`\nfirst error: ${errors[0]!.image} / ${errors[0]!.concept}\n  ${errors[0]!.error}`);
-}
 
-function printRow(r: Row) {
-  if (rows.length === 1) {
-    console.log(`${pad("image", 28)} | ${pad("concept", 16)} | ${pad("instances", 9)} | ${pad("mean score", 10)} | ms`);
-    console.log(`${"-".repeat(28)}-+-${"-".repeat(16)}-+-${"-".repeat(9)}-+-${"-".repeat(10)}-+------`);
-  }
+if (instancesSeen > 0 && instancesWithScore === 0) {
   console.log(
-    `${pad(r.image, 28)} | ${pad(r.concept, 16)} | ${pad(String(r.instances), 9)} | ${pad(r.meanScore == null ? "—" : r.meanScore.toFixed(2), 10)} | ${r.ms}`,
+    `\n⚠ SAM returned no confidence scores (all 0), so mean score is meaningless${opts.minScore > 0 ? " and --min-score dropped every instance" : ""}.`,
   );
 }
+if (errors.length) console.log(`\nfirst error: ${errors[0]!.image} / ${errors[0]!.concept}\n  ${errors[0]!.error}`);
 
-function pad(s: string, n: number) {
-  return s.length > n ? `${s.slice(0, n - 1)}…` : s.padEnd(n);
-}
-
-function slug(s: string) {
-  return s.replace(/\W+/g, "_");
-}
+const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
+const runFile = join(outDir, `run-${stamp}.json`);
+await writeFile(
+  runFile,
+  JSON.stringify({ startedAt: new Date().toISOString(), dir: inDir, concepts: opts.concepts, minScore: opts.minScore, summary, rows }, null, 2),
+);
+console.log(`run log:          ${runFile}`);
