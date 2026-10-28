@@ -20,7 +20,7 @@ const Env = z.object({
   SAM_USD_PER_IMAGE: z.string().default(""),
 
   // Agent tunables
-  MAX_AGENT_STEPS: z.coerce.number().int().positive().default(25),
+  MAX_AGENT_STEPS: z.coerce.number().int().positive().default(30), // model turns per run (tool calls do not count)
   MAX_COST_PER_VISIT_USD: z.coerce.number().positive().default(1.5),
   ASK_BACK_THRESHOLD: z.coerce.number().min(0).max(1).default(0.6),
   MAX_IMAGE_EDGE_PX: z.coerce.number().int().positive().default(1600),

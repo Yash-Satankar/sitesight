@@ -213,17 +213,33 @@ Images go to Spark as base64 (resized to ≤1600px long edge with sharp), not pu
 ```
 load visit context (zones, BOQ items, photos, transcripts, prior assessments, ask-back answers)
 messages = [system, context]
-for step in 1..MAX_AGENT_STEPS:
+for turn in 1..MAX_AGENT_STEPS:                       # model turns only; tool calls in a turn do not count (default 30)
+    if 4 turns are left: append the wrap-up message once (notice step "wrap_up")
     check visit budget (cost.ts) → abort with a cost_limit trace step if exhausted
     resp = spark.respond(messages, tools)
-    trace(resp)
-    if no tool calls: nudge once ("call finish or request_photo"), then fail the run
+    trace(resp + usage + context size: input items, images in context)
+    if no tool calls: nudge once (notice step), then fail the run
     for each tool call:
-        validate args with zod → on failure return the error to the model as a tool result
+        validate args with zod → on failure return every issue with its path to the model
+            ("Invalid arguments for verify_segments: decisions[1].reason: required when keep is false")
         result = handler(args); trace(result); trace(result.events)   # e.g. one `rejection` step per rejected segment
         if tool == finish: end run
-messages += tool results
+    messages += tool results, then one image message per photo from view_photo
+    for each photo fully verified this turn: replace its image messages with a text summary (compaction)
+end: open ask-backs → needs_input · finish → assessed · out of turns → partial (assessments kept, visit goes to review)
 ```
+
+### Step budget and wrap-up
+The first real dry run spent all 25 turns verifying segments one call at a time and recorded nothing. Now:
+- `MAX_AGENT_STEPS` counts model turns only, default 30.
+- When 4 turns are left the loop sends: "Step budget nearly used. Record assessments for every BOQ item you have evidence for (mark others with low confidence or skip), then call finish."
+- If the loop still ends without `finish`, the run is `partial` (not `failed`): recorded assessments are kept, the visit moves to `assessed` for review, and a `step_budget` notice says how many were kept. The worker does not retry it.
+
+### Context compaction
+Images dominate input tokens, and every turn resends the whole conversation. So:
+- Mask/panel overlays from `view_photo` are resized to at most 1280 px on the long edge (plain photos stay at `MAX_IMAGE_EDGE_PX`). When an overlay is shrunk, the tool result says how to convert coordinates back to photo pixels.
+- Once `verify_segments` has decided every segment of a photo, all earlier image messages for that photo are replaced by a placeholder such as `[photo 2 image removed — verified: kept 2, 3, 4; rejected 1 (scaffolding pole). Call view_photo again to see it.]`. A new `view_photo` call sends the image again.
+- Every model step logs input tokens and images in context (trace payload `context`, worker log, dry-run output) to show the effect.
 
 ### Segment targets (`concepts.ts`)
 SAM only segments two **targets**. Each target runs every prompt variant listed for it; instances from different variants whose mask IoU > 0.5 are the same object, and the higher-score one is kept. Segments are stored under the target name, not the prompt.
@@ -237,9 +253,9 @@ Chosen from the day-1 spike (`pnpm sam-spike`, 19 site photos). Not segmented, b
 
 ### Verify before measure
 SAM also finds things that look like the target: scaffolding poles, trees, steel columns, safety nets/tarps, neighbouring buildings. So every instance is checked by the agent before it counts:
-1. `segment_photo(photo_id, targets)` → instances with segment ids, `verified = null`.
-2. `view_photo(photo_id, with_masks=true)` → overlay labelled `#<segment_id> <target>`; rejected masks are hidden.
-3. `verify_segments(photo_id, decisions)` → `keep` or reject each instance, with a short reason for rejections (stored in `segments.reject_reason`). Each rejection is its own `rejection` trace step, shown in the UI. Ids from another photo fail the whole call; nothing is saved.
+1. `segment_photo(photo_id, targets)` → instances with segment ids, `verified = null`. For a photo it will segment, the agent segments first and skips a plain `view_photo`.
+2. `view_photo(photo_id, with_masks=true)` → overlay labelled `#<segment_id> <target> <SAM score>`; rejected masks are hidden.
+3. `verify_segments(photo_id, decisions)` → **one photo per call, covering all its segments**: a decision for every unverified segment of that photo, or the call is refused with the missing ids and nothing is saved. `reason` is required to reject (stored in `segments.reject_reason`) and optional to keep. Prompt rules: a keep with score < 0.6 needs a specific visual reason; no identical boilerplate reasons; duplicate/overlapping detections of the same element are rejected ("duplicate of #id"). Each rejection is its own `rejection` trace step. Ids from another photo fail the whole call.
 4. `measure` only accepts segments with `verified = true`; otherwise it returns an error telling the model to verify first.
 
 ### Tools
@@ -248,9 +264,9 @@ SAM also finds things that look like the target: scaffolding poles, trees, steel
 |---|---|---|---|
 | `list_boq_items` | `zone_id?` | items with unit, planned_qty, measure_mode, segment_targets | |
 | `list_photos` | `zone_id?` | id, zone, transcript, has_segments | |
-| `view_photo` | `photo_id`, `with_masks?: bool`, `draw_panel?: panel` | image (as input_image) + mask legend (segment id, target, score, verified) + panel size/warnings | Overlay drawn by `overlay.ts`, labels `#<segment_id>`; rejected masks hidden; `draw_panel` outlines a panel so the model checks it before measuring |
+| `view_photo` | `photo_id`, `with_masks?: bool`, `draw_panel?: panel` | image (as input_image) + mask legend (segment id, target, score, verified) + panel size/warnings | Overlay drawn by `overlay.ts`, labels `#<segment_id> <target> <score>`, max 1280 px; rejected masks hidden; `draw_panel` outlines a panel so the model checks it before measuring |
 | `segment_photo` | `photo_id`, `targets: ('column' \| 'brickwork')[]` | per target: instances with segment ids, areas_px, scores, verified | All prompt variants via SAM 3.1 (concurrent, budget-gated), IoU-merged, cached per (photo, target) |
-| `verify_segments` | `photo_id`, `decisions: [{segment_id, keep, reason}]` | kept, rejected, unverified_remaining | Reason required for rejections; all-or-nothing |
+| `verify_segments` | `photo_id`, `decisions: [{segment_id, keep, reason?}]` | kept, rejected, unverified_remaining | Must cover every unverified segment of the photo; reason required to reject; all-or-nothing; triggers context compaction for the photo |
 | `measure` | `photo_id`, `mode: 'panel' | 'reference'`; panel: `target_segment_ids`, `panel`; reference: `segment_ids`, `reference: 'a4' | 'tape_1m' | 'brick'` | panel: `measurement_id`, panel_area_px, covered_area_px, fraction, clipped, warnings. reference: count, area_m2 (approx), scale_confidence | Pure code, no model. Verified segments only. Panel results stored in `panel_measurements` |
 | `get_previous_assessment` | `boq_item_id` | last accepted assessment | |
 | `record_assessment` | `boq_item_id, percent_complete, qty_done?, panel_measurement_id?, confidence, rationale, evidence: [{photo_id, segment_ids}], deviation?` | ok, qty_done, qty_basis | Upsert per visit. With `panel_measurement_id` code computes qty_done (model value ignored) and adds the panel photo + targets to evidence |
@@ -330,7 +346,7 @@ SPARK_OUTPUT_USD_PER_MTOK=
 SAM_USD_PER_IMAGE=0.0025
 
 # Agent tunables
-MAX_AGENT_STEPS=25
+MAX_AGENT_STEPS=30            # model turns per run; tool calls do not count
 MAX_COST_PER_VISIT_USD=1.50
 ASK_BACK_THRESHOLD=0.6
 MAX_IMAGE_EDGE_PX=1600

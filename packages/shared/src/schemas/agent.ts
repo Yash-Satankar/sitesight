@@ -13,11 +13,15 @@ export const VisitStatus = z.enum([
 ]);
 export type VisitStatus = z.infer<typeof VisitStatus>;
 
-export const AgentRunStatus = z.enum(["running", "finished", "needs_input", "failed"]);
+/** `partial`: the step budget ran out before `finish`; recorded assessments are kept. */
+export const AgentRunStatus = z.enum(["running", "finished", "needs_input", "partial", "failed"]);
 export type AgentRunStatus = z.infer<typeof AgentRunStatus>;
 
-/** `rejection`: the agent rejected a SAM segment in verify_segments (payload: RejectionPayload). */
-export const AgentStepKind = z.enum(["model", "tool_call", "tool_result", "rejection", "error"]);
+/**
+ * `rejection`: the agent rejected a SAM segment in verify_segments (payload: RejectionPayload).
+ * `notice`: a message the loop itself sent or decided (nudge, step-budget wrap-up, partial end).
+ */
+export const AgentStepKind = z.enum(["model", "tool_call", "tool_result", "rejection", "notice", "error"]);
 export type AgentStepKind = z.infer<typeof AgentStepKind>;
 
 export interface RejectionPayload {
@@ -84,13 +88,27 @@ export const ToolArgs = {
     photo_id: z.number().int(),
     decisions: z
       .array(
-        z.object({
-          segment_id: z.number().int(),
-          keep: z.boolean(),
-          reason: z.string().describe("Required when keep=false, e.g. 'scaffolding pole'."),
-        }),
+        z
+          .object({
+            segment_id: z.number().int(),
+            keep: z.boolean(),
+            reason: z
+              .string()
+              .optional()
+              .describe("Required when keep=false (what it actually is, e.g. 'scaffolding pole'). For keeps, what in the image confirms it."),
+          })
+          .superRefine((d, ctx) => {
+            if (!d.keep && !d.reason?.trim()) {
+              ctx.addIssue({
+                code: "custom",
+                path: ["reason"],
+                message: "required when keep is false: say what the segment actually is, e.g. 'scaffolding pole'",
+              });
+            }
+          }),
       )
-      .min(1),
+      .min(1)
+      .describe("One decision for every unverified segment of this photo, all in this one call."),
   }),
   // Flat object (not a top-level union) so the JSON schema stays a plain object for function calling.
   measure: z

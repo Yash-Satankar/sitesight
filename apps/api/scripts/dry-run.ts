@@ -24,7 +24,7 @@ export interface DryRunOptions {
 }
 
 export interface DryRunSummary {
-  outcome: "assessed" | "needs_input" | "failed";
+  outcome: "assessed" | "needs_input" | "partial" | "failed";
   error: string | null;
   visitId: number;
   assessments: { code: string; percentComplete: number; qtyDone: number | null; confidence: number; photoIds: number[]; rationale: string }[];

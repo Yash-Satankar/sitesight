@@ -163,7 +163,9 @@ describe("segment_photo", () => {
   it("accepts target names only", async () => {
     const { ctx, photo1 } = await seed();
     const out = await run("segment_photo", { photo_id: photo1.id, targets: ["concrete slab"] }, ctx);
-    expect(errorOf(out)).toBe("Invalid arguments");
+    expect(errorOf(out)).toBe(
+      "Invalid arguments for segment_photo: targets[0]: Invalid enum value. Expected 'column' | 'brickwork', received 'concrete slab'",
+    );
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -246,7 +248,7 @@ describe("verify-before-measure", () => {
     const { ctx, photo1 } = await seed();
     const seg = await insertSegment(photo1.id);
     const out = await run("verify_segments", { photo_id: photo1.id, decisions: [{ segment_id: seg.id, keep: false, reason: "  " }] }, ctx);
-    expect(errorOf(out)).toMatch(/reason for every rejection/);
+    expect(errorOf(out)).toContain("decisions[0].reason: required when keep is false");
     expect((await segmentRow(seg.id)).verified).toBeNull();
   });
 
@@ -359,8 +361,7 @@ describe("panel measurement (tools)", () => {
   it("validates mode-specific arguments", async () => {
     const { ctx, photo1, halfWall } = await panelSetup();
     const out = await run("measure", { photo_id: photo1.id, mode: "panel", target_segment_ids: [halfWall.id] }, ctx);
-    expect(errorOf(out)).toBe("Invalid arguments");
-    expect(JSON.stringify(out.output)).toMatch(/panel is required in panel mode/);
+    expect(errorOf(out)).toBe("Invalid arguments for measure: panel: panel is required in panel mode");
   });
 
   it("record_assessment computes qty_done = fraction × panel_planned_qty and ignores the model's number", async () => {

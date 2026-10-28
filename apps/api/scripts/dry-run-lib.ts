@@ -149,9 +149,16 @@ export function describeStep(step: StepLike): string[] {
     case "model": {
       const text = typeof p.text === "string" ? p.text.trim() : "";
       const usage = p.usage as { input_tokens?: number; output_tokens?: number } | undefined;
-      const tokens = usage ? ` (${usage.input_tokens ?? 0} in / ${usage.output_tokens ?? 0} out tokens)` : "";
-      return [`[model]${tokens}${text ? ` ${truncate(text, 600)}` : ""}`];
+      const c = p.context as { turn?: number; max_turns?: number; images?: number } | undefined;
+      const info = [
+        c?.turn != null ? `turn ${c.turn}/${c.max_turns}` : null,
+        usage ? `${usage.input_tokens ?? 0} in / ${usage.output_tokens ?? 0} out tokens` : null,
+        c?.images != null ? `${c.images} image${c.images === 1 ? "" : "s"} in context` : null,
+      ].filter(Boolean);
+      return [`[model]${info.length ? ` (${info.join(", ")})` : ""}${text ? ` ${truncate(text, 600)}` : ""}`];
     }
+    case "notice":
+      return [`  [notice: ${step.name}] ${truncate(String(p.message ?? ""), 400)}`];
     case "tool_call":
       return [`  -> ${step.name}(${compact(step.payload, 300)})`];
     case "tool_result":

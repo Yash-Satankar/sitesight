@@ -36,12 +36,22 @@ export class Tracer {
       .set({ steps: dsql`${schema.agentRuns.steps} + 1` })
       .where(eq(schema.agentRuns.id, this.runId));
     if (!listeners.size) {
-      console.log(`[run ${this.runId}] ${kind}${name ? ` ${name}` : ""}`);
+      console.log(`[run ${this.runId}] ${kind}${name ? ` ${name}` : ""}${kind === "model" ? contextSummary(payload) : ""}`);
       return;
     }
     // Awaited so listener output stays in step order with the agent loop.
     for (const listener of listeners) await listener({ runId: this.runId, idx, kind, name, payload: clean });
   }
+}
+
+/** " (turn 3/30, 12345 in tokens, 2 images in context)" for model steps, to watch context growth. */
+export function contextSummary(payload: unknown): string {
+  const p = (payload ?? {}) as { usage?: { input_tokens?: number }; context?: { turn?: number; max_turns?: number; images?: number } };
+  const parts: string[] = [];
+  if (p.context?.turn != null) parts.push(`turn ${p.context.turn}/${p.context.max_turns}`);
+  if (p.usage?.input_tokens != null) parts.push(`${p.usage.input_tokens} in tokens`);
+  if (p.context?.images != null) parts.push(`${p.context.images} image${p.context.images === 1 ? "" : "s"} in context`);
+  return parts.length ? ` (${parts.join(", ")})` : "";
 }
 
 /** Drop base64 images and cap long strings so trace rows stay small. */

@@ -15,11 +15,18 @@ Rules:
 - Use the tools. Start with list_boq_items and list_photos, then work zone by zone.
 - segment_photo only finds ${TARGET_LIST}. Use it for items whose segment_targets are not empty.
   Everything else (reinforcement steel, slabs, plaster, openings, waterproofing, …) is "visual_only": judge it from view_photo.
-- Verify before you measure. After segment_photo, call view_photo with with_masks=true and check every instance
-  (masks are labelled #<segment_id>). Then call verify_segments for that photo with a decision for each instance:
-  keep=true only if it really is the target and part of the structure being assessed. Reject ${REJECT_EXAMPLES.join("; ")}.
-  Give a short reason for each rejection, e.g. "scaffolding pole", "tree trunk", "steel column".
-  measure refuses segments that are not verified.
+- Segment first, then look. For a photo you will segment, do not call plain view_photo first: call segment_photo,
+  then view_photo with with_masks=true. Use plain view_photo only for photos you need for visual_only items.
+- Verify before you measure. Verify one photo per call, covering all its segments: one verify_segments call per photo
+  with a decision for every unverified instance (masks are labelled "#<segment_id> <target> <SAM score>").
+  - keep=true only if it really is the target and part of the structure being assessed.
+  - Reject ${REJECT_EXAMPLES.join("; ")}. Give a short reason for each rejection, e.g. "scaffolding pole", "tree trunk".
+  - Reject duplicates: if two masks cover the same element (overlapping detections), keep the better one and reject
+    the other as "duplicate of #<id>".
+  - A segment scoring below 0.6 needs a specific visual reason to keep: say what in the image confirms it
+    (e.g. "formwork marks and rebar starters visible at the top"). Identical boilerplate reasons are not acceptable.
+  measure refuses segments that are not verified. Once a photo is verified its image is removed from the conversation
+  and replaced by a summary of your decisions; call view_photo again if you need to see it.
 - For items with measure_mode "count" or "area", use the verified segments with measure rather than eyeballing.
   For "count", deduplicate instances that appear in more than one photo of the same zone.
   For "area" items use measure(mode="panel"): pick the wall panel the item covers, either between two verified
@@ -38,6 +45,10 @@ Rules:
 - Never invent BOQ items, photo ids or segment ids. Only use ids returned by the tools.
 - When every relevant item is assessed or has an open photo request, call finish with a short summary.`;
 }
+
+/** Sent by the loop when WRAP_UP_TURNS model turns are left. */
+export const WRAP_UP =
+  "Step budget nearly used. Record assessments for every BOQ item you have evidence for (mark others with low confidence or skip), then call finish.";
 
 export const NUDGE =
   "You did not call a tool. Continue using the tools; when you are done, call finish (or request_photo if you need more evidence).";

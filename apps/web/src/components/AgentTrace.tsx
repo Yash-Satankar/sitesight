@@ -6,6 +6,7 @@ const KIND_STYLE: Record<AgentStep["kind"], string> = {
   tool_call: "border-blue-300 bg-blue-50",
   tool_result: "border-gray-200 bg-white",
   rejection: "border-amber-400 bg-amber-50 text-amber-900",
+  notice: "border-sky-400 bg-sky-50 text-sky-900",
   error: "border-red-400 bg-red-50 text-red-800",
 };
 
@@ -33,8 +34,8 @@ export function AgentTrace({ steps }: { steps: AgentStep[] }) {
 
 function StepBody({ step }: { step: AgentStep }) {
   const p = step.payload as Record<string, unknown> | null;
-  if (step.kind === "error" && p) {
-    return <p className="font-medium">{String(p.message ?? "Run failed")}</p>;
+  if ((step.kind === "error" || step.kind === "notice") && p) {
+    return <p className="font-medium">{String(p.message ?? (step.kind === "error" ? "Run failed" : ""))}</p>;
   }
   if (step.kind === "rejection" && p) {
     const r = p as unknown as RejectionPayload;

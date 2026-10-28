@@ -1,5 +1,7 @@
 import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
+import type { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import sharp from "sharp";
 import {
   SegmentTarget,
   ToolArgs,
@@ -35,6 +37,27 @@ export interface ToolOutcome {
   done?: boolean;
   /** Extra trace steps to record after the tool result (e.g. one `rejection` step per rejected segment). */
   events?: { kind: AgentStepKind; name: string; payload: unknown }[];
+  /** All segments of this photo are verified: the loop may drop its earlier images from the context. */
+  compactPhoto?: { photoId: number; placeholder: string };
+}
+
+/** Max long edge of overlay images (masks / panel) sent to the model. */
+export const OVERLAY_MAX_EDGE_PX = 1280;
+
+/** zod issues as "decisions[1].reason: required …" strings. */
+export function formatIssues(error: z.ZodError): string[] {
+  return error.issues.map((issue) => {
+    const path = issue.path.reduce<string>(
+      (acc, part) => (typeof part === "number" ? `${acc}[${part}]` : acc ? `${acc}.${part}` : String(part)),
+      "",
+    );
+    return `${path || "(arguments)"}: ${issue.message}`;
+  });
+}
+
+/** Mask label in view_photo overlays: id (to reference), target, SAM score, and "ok" once verified. */
+export function maskLabel(s: { id: number; concept: string; score: number; verified: boolean | null }): string {
+  return `#${s.id} ${s.concept} ${s.score.toFixed(2)}${s.verified ? " ok" : ""}`;
 }
 
 const DESCRIPTIONS: Record<ToolName, string> = {
@@ -45,7 +68,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     "Look at a photo. with_masks=true overlays this photo's masks, each labelled #<segment_id> <target>; rejected segments are hidden. draw_panel outlines a measurement panel (same format as measure's panel) so you can check it before measuring.",
   segment_photo: `Run SAM 3.1 on a photo for measure targets (${SegmentTarget.options.join(", ")}). Returns instances per target with segment ids, areas and scores. Cached. Every instance must then be checked with view_photo(with_masks=true) + verify_segments before measure.`,
   verify_segments:
-    "Accept or reject segments of one photo after looking at the masks. Reject anything that is not the structure being assessed, with a short reason. measure only accepts accepted (verified) segments.",
+    "Verify one photo per call, covering all its segments: one decision (keep or reject) for EVERY unverified segment of that photo, after viewing it with with_masks=true. Calls that leave any unverified segment out are refused and save nothing. Rejections need a reason (what it actually is); keeps with a low score need a specific visual reason. measure only accepts kept (verified) segments.",
   measure:
     "Pure code, no model; verified segments only. mode='panel' (preferred for area items): fraction of a wall panel covered by target_segment_ids, where panel is the space between two verified columns (left_column_id, right_column_id, top_y, bottom_y) or a 4-point polygon. Returns measurement_id for record_assessment. mode='reference': count + approximate m² from a scale object (A4/tape/brick) visible in the photo.",
   get_previous_assessment: "Get the last engineer-accepted assessment of a BOQ item from an earlier visit.",
@@ -71,17 +94,21 @@ const REFERENCE_CONCEPT: Record<ScaleReference, string> = {
 };
 
 export async function runTool(name: string, rawArgs: string, ctx: ToolContext): Promise<ToolOutcome> {
-  if (!(name in ToolArgs)) return { output: { error: `Unknown tool "${name}"` } };
+  if (!(name in ToolArgs)) return { output: { error: `Unknown tool "${name}". Available tools: ${TOOL_NAMES.join(", ")}.` } };
   const tool = name as ToolName;
 
   let json: unknown;
   try {
     json = rawArgs ? JSON.parse(rawArgs) : {};
-  } catch {
-    return { output: { error: "Arguments were not valid JSON." } };
+  } catch (err) {
+    return { output: { error: `Arguments for ${tool} were not valid JSON: ${(err as Error).message}` } };
   }
   const parsed = ToolArgs[tool].safeParse(json);
-  if (!parsed.success) return { output: { error: "Invalid arguments", issues: parsed.error.flatten() } };
+  if (!parsed.success) {
+    // Give the model every issue with its exact path so it can fix the call in one go.
+    const issues = formatIssues(parsed.error);
+    return { output: { error: `Invalid arguments for ${tool}: ${issues.join("; ")}`, issues } };
+  }
 
   try {
     // Each handler receives its own validated args; the cast is safe because of the lookup above.
@@ -163,13 +190,9 @@ const handlers: Handlers = {
       const segs = all.filter((s) => s.verified !== false);
       hiddenRejected = all.length - segs.length;
       if (segs.length) {
-        // Labels carry the segment id so the model can reference it in verify_segments / measure.
+        // Labels carry the segment id (to reference in verify_segments / measure) and the SAM score.
         const masks = await Promise.all(
-          segs.map(async (s) => ({
-            mask: await getObject(s.maskKey),
-            bbox: s.bbox,
-            label: `#${s.id} ${s.concept}${s.verified ? " (ok)" : ""}`,
-          })),
+          segs.map(async (s) => ({ mask: await getObject(s.maskKey), bbox: s.bbox, label: maskLabel(s) })),
         );
         buffer = await drawMasks(buffer, masks);
         legend = segs.map((s) => ({ segment_id: s.id, target: s.concept, score: round2(s.score), verified: s.verified }));
@@ -186,11 +209,30 @@ const handlers: Handlers = {
         warnings: panel.warnings,
       };
     }
+
+    // Overlays only need enough detail to judge masks; a smaller image keeps input tokens down.
+    let shown = { width: img.width, height: img.height };
+    if ((with_masks || draw_panel) && Math.max(img.width, img.height) > OVERLAY_MAX_EDGE_PX) {
+      const { data, info } = await sharp(buffer)
+        .resize({ width: OVERLAY_MAX_EDGE_PX, height: OVERLAY_MAX_EDGE_PX, fit: "inside" })
+        .jpeg({ quality: 82 })
+        .toBuffer({ resolveWithObject: true });
+      buffer = data;
+      shown = { width: info.width, height: info.height };
+    }
+    const scaled = shown.width !== img.width;
     return {
       output: {
         photo_id: photo.id,
         width: img.width,
         height: img.height,
+        ...(scaled
+          ? {
+              shown_width: shown.width,
+              shown_height: shown.height,
+              coordinate_note: `Shown at ${shown.width}×${shown.height}. Panel coordinates (top_y, bottom_y, polygon) are in ${img.width}×${img.height} photo pixels: multiply what you read off this image by ${round2(img.width / shown.width)}.`,
+            }
+          : {}),
         mask_legend: legend,
         hidden_rejected_segments: hiddenRejected,
         ...(panelPreview ? { panel: panelPreview } : {}),
@@ -229,8 +271,7 @@ const handlers: Handlers = {
     const ids = decisions.map((d) => d.segment_id);
     const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
     if (dupes.length) return { output: { error: `Duplicate segment_ids in decisions: ${dupes.join(", ")}` } };
-    const noReason = decisions.filter((d) => !d.keep && !d.reason.trim()).map((d) => d.segment_id);
-    if (noReason.length) return { output: { error: `Give a reason for every rejection (segment_ids ${noReason.join(", ")}).` } };
+    // (A rejection without a reason is refused by the argument schema.)
 
     const rows = await db
       .select()
@@ -247,27 +288,41 @@ const handlers: Handlers = {
       };
     }
 
+    // One photo per call, covering all of it: piecemeal verification burned the step budget in the first dry run.
+    const unverified = await db
+      .select({ id: schema.segments.id })
+      .from(schema.segments)
+      .where(and(eq(schema.segments.photoId, photo.id), isNull(schema.segments.verified)))
+      .orderBy(schema.segments.id);
+    const decided = new Set(ids);
+    const missing = unverified.map((u) => u.id).filter((id) => !decided.has(id));
+    if (missing.length) {
+      return {
+        output: {
+          error: `verify_segments must decide every unverified segment of photo ${photo.id} in one call. Missing decisions for segment_ids ${missing.join(", ")}. No decisions were saved; call again with all of them.`,
+          missing_segment_ids: missing,
+        },
+      };
+    }
+
     await db.transaction(async (tx) => {
       for (const d of decisions) {
         await tx
           .update(schema.segments)
-          .set({ verified: d.keep, rejectReason: d.keep ? null : d.reason.trim() })
+          .set({ verified: d.keep, rejectReason: d.keep ? null : d.reason!.trim() })
           .where(eq(schema.segments.id, d.segment_id));
       }
     });
 
-    const remaining = await db
-      .select({ id: schema.segments.id })
-      .from(schema.segments)
-      .where(and(eq(schema.segments.photoId, photo.id), isNull(schema.segments.verified)));
     const byId = new Map(rows.map((r) => [r.id, r]));
     const rejected = decisions.filter((d) => !d.keep);
+    const all = await db.select().from(schema.segments).where(eq(schema.segments.photoId, photo.id)).orderBy(schema.segments.id);
     return {
       output: {
         ok: true,
         kept: decisions.filter((d) => d.keep).map((d) => d.segment_id),
         rejected: rejected.map((d) => d.segment_id),
-        unverified_remaining: remaining.map((r) => r.id),
+        unverified_remaining: [],
       },
       events: rejected.map((d) => ({
         kind: "rejection" as const,
@@ -276,9 +331,10 @@ const handlers: Handlers = {
           photo_id: photo.id,
           segment_id: d.segment_id,
           target: byId.get(d.segment_id)!.concept,
-          reason: d.reason.trim(),
+          reason: d.reason!.trim(),
         } satisfies RejectionPayload,
       })),
+      compactPhoto: { photoId: photo.id, placeholder: verifiedPlaceholder(photo.id, all) },
     };
   },
 
@@ -496,6 +552,16 @@ async function getPhoto(photoId: number, ctx: ToolContext): Promise<PhotoRow> {
     .where(and(eq(schema.photos.id, photoId), eq(schema.photos.visitId, ctx.visitId)));
   if (!photo) throw new Error(`photo_id ${photoId} is not in this visit`);
   return photo;
+}
+
+/** Text that replaces a fully verified photo's images in the conversation, so the outcome stays in context. */
+export function verifiedPlaceholder(photoId: number, segs: { id: number; verified: boolean | null; rejectReason: string | null }[]): string {
+  const list = (items: string[]) => (items.length > 25 ? `${items.slice(0, 25).join(", ")}, … (${items.length} total)` : items.join(", ") || "none");
+  const kept = segs.filter((s) => s.verified === true).map((s) => String(s.id));
+  const rejected = segs
+    .filter((s) => s.verified === false)
+    .map((s) => `${s.id} (${(s.rejectReason ?? "").slice(0, 40)})`);
+  return `[photo ${photoId} image removed — verified: kept ${list(kept)}; rejected ${list(rejected)}. Call view_photo again to see it.]`;
 }
 
 /** Segments of this photo with the given ids, all verified — or an error message for the model. */

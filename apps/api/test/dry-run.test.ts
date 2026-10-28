@@ -131,7 +131,8 @@ describe("agent dry run", () => {
     expect(text).toMatch(/GF-2 {2}Brickwork 230 mm.*\[area via brickwork, panel 12\.5 m2\]/);
 
     // Streamed trace
-    expect(text).toMatch(/\[model\] \(10 in \/ 10 out tokens\) Starting with the BOQ and photos\./);
+    expect(text).toMatch(/\[model\] \(turn 1\/10, 10 in \/ 10 out tokens, 0 images in context\) Starting with the BOQ and photos\./);
+    expect(text).toMatch(/\[notice: context_compacted\] \[photo \d+ image removed — verified: kept \d+; rejected \d+ \(scaffolding pole\)/);
     expect(text).toMatch(/-> segment_photo\(\{"photo_id":\d+,"targets":\["column"\]\}\)/);
     expect(text).toMatch(/<- segment_photo: column: 2 instance\(s\)/);
     expect(text).toMatch(/<- verify_segments: kept \[\d+\], rejected \[\d+\], still unverified \[\]/);

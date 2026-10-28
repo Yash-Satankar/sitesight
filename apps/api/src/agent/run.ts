@@ -3,14 +3,19 @@ import { env } from "../config.js";
 import { db, schema } from "../db/client.js";
 import { functionCallOutput, functionCalls, outputAsInput, respond, type SparkInputItem } from "../meta/spark.js";
 import { assertWithinBudget, CostLimitError } from "../meta/cost.js";
-import { NUDGE, systemPrompt } from "./prompts.js";
+import { NUDGE, systemPrompt, WRAP_UP } from "./prompts.js";
 import { runTool, toolDefs, type ToolContext } from "./tools.js";
 import { Tracer } from "./trace.js";
 
-export type RunOutcome = "assessed" | "needs_input";
+/** `partial`: the model-turn budget ran out before `finish`; recorded assessments are kept. */
+export type RunOutcome = "assessed" | "needs_input" | "partial";
+
+/** The wrap-up message is sent when this many model turns are left. */
+export const WRAP_UP_TURNS = 4;
 
 /**
- * The agent loop (DESIGN.md §7). Ends with `finish` → assessed, or with ≥1 open ask-back → needs_input.
+ * The agent loop (DESIGN.md §7). Ends with `finish` → assessed, with ≥1 open ask-back → needs_input,
+ * or out of model turns → partial. MAX_AGENT_STEPS counts model turns only.
  * Never relies on forcing a tool: tool_choice is "auto" only on Muse Spark.
  */
 export async function runAgent(visitId: number): Promise<RunOutcome> {
@@ -25,10 +30,21 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
 
   try {
     const input: SparkInputItem[] = [{ role: "user", content: await buildContext(visitId) }];
+    const maxTurns = env.MAX_AGENT_STEPS;
     let finished = false;
     let nudged = false;
+    let wrapUpSent = false;
+    // Where each photo's image messages sit in `input`, so they can be swapped for text once verified.
+    const imageMessages = new Map<number, number[]>();
 
-    for (let step = 1; step <= env.MAX_AGENT_STEPS && !finished; step++) {
+    for (let turn = 1; turn <= maxTurns && !finished; turn++) {
+      const turnsLeft = maxTurns - turn + 1;
+      if (!wrapUpSent && maxTurns > WRAP_UP_TURNS && turnsLeft === WRAP_UP_TURNS) {
+        input.push({ role: "user", content: WRAP_UP });
+        wrapUpSent = true;
+        await tracer.step("notice", "wrap_up", { message: WRAP_UP, turns_left: turnsLeft });
+      }
+
       // Don't start a paid call if earlier runs of this visit already used the budget.
       // spark.respond and sam.segment also throw CostLimitError right after the call that crosses it.
       await assertWithinBudget(visitId);
@@ -38,6 +54,8 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
         text: resp.output_text,
         tool_calls: calls.map((c) => ({ name: c.name, arguments: c.arguments })),
         usage: resp.usage,
+        // Logged per turn to watch context growth (and the effect of image compaction).
+        context: { turn, max_turns: maxTurns, input_items: input.length, images: countImages(imageMessages) },
       });
       // Keep reasoning + function_call items in the conversation (same as scripts/spark-smoke.ts check 3).
       input.push(...outputAsInput(resp));
@@ -46,10 +64,12 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
         if (nudged) throw new Error("Model stopped calling tools after a nudge.");
         nudged = true;
         input.push({ role: "user", content: NUDGE });
+        await tracer.step("notice", "nudge", { message: NUDGE });
         continue;
       }
 
       const pendingImages: { photoId: number; dataUrl: string }[] = [];
+      const compactions: { photoId: number; placeholder: string }[] = [];
       for (const call of calls) {
         await tracer.step("tool_call", call.name, safeJson(call.arguments));
         const outcome = await runTool(call.name, call.arguments, ctx);
@@ -58,18 +78,32 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
         // Every call_id must get an output before the next turn, even after `finish`.
         input.push(functionCallOutput(call, outcome.output));
         if (outcome.images) pendingImages.push(...outcome.images);
+        if (outcome.compactPhoto) compactions.push(outcome.compactPhoto);
         if (outcome.done) finished = true;
       }
 
-      // Images go in a user message after the tool results (works on any Responses-compatible server).
-      if (pendingImages.length && !finished) {
-        input.push({
-          role: "user",
-          content: pendingImages.flatMap((img) => [
-            { type: "input_text" as const, text: `Photo ${img.photoId}:` },
-            { type: "input_image" as const, image_url: img.dataUrl, detail: "auto" as const },
-          ]),
-        });
+      // Images go in user messages after the tool results (works on any Responses-compatible server),
+      // one message per photo so a photo's images can later be replaced on their own.
+      if (!finished) {
+        for (const img of pendingImages) {
+          imageMessages.set(img.photoId, [...(imageMessages.get(img.photoId) ?? []), input.length]);
+          input.push({
+            role: "user",
+            content: [
+              { type: "input_text" as const, text: `Photo ${img.photoId}:` },
+              { type: "input_image" as const, image_url: img.dataUrl, detail: "auto" as const },
+            ],
+          });
+        }
+      }
+
+      // A fully verified photo's images are no longer needed: keep only a text summary of the decisions.
+      // view_photo sends the image again if the model asks for it.
+      for (const c of compactions) {
+        const indexes = imageMessages.get(c.photoId) ?? [];
+        for (const i of indexes) input[i] = { role: "user", content: c.placeholder };
+        imageMessages.delete(c.photoId);
+        if (indexes.length) await tracer.step("notice", "context_compacted", { message: c.placeholder, images_removed: indexes.length });
       }
     }
 
@@ -81,13 +115,26 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
     let outcome: RunOutcome;
     if (openAskBacks.length > 0) outcome = "needs_input";
     else if (finished) outcome = "assessed";
-    else throw new Error(`Reached MAX_AGENT_STEPS=${env.MAX_AGENT_STEPS} without finish.`);
+    else outcome = "partial";
 
+    if (outcome === "partial") {
+      const kept = await db.select({ id: schema.assessments.id }).from(schema.assessments).where(eq(schema.assessments.visitId, visitId));
+      await tracer.step("notice", "step_budget", {
+        message: `Used all ${maxTurns} model turns without finish; kept ${kept.length} recorded assessment(s).`,
+        assessments_kept: kept.length,
+      });
+    }
+
+    const runStatus = { assessed: "finished", needs_input: "needs_input", partial: "partial" } as const;
     await db
       .update(schema.agentRuns)
-      .set({ status: outcome === "assessed" ? "finished" : "needs_input", finishedAt: new Date() })
+      .set({ status: runStatus[outcome], finishedAt: new Date() })
       .where(eq(schema.agentRuns.id, runId));
-    await db.update(schema.visits).set({ status: outcome }).where(eq(schema.visits.id, visitId));
+    // A partial run still produced reviewable assessments, so the visit moves on to review.
+    await db
+      .update(schema.visits)
+      .set({ status: outcome === "partial" ? "assessed" : outcome })
+      .where(eq(schema.visits.id, visitId));
     return outcome;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -107,6 +154,12 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
       .where(eq(schema.agentRuns.id, runId));
     throw err;
   }
+}
+
+function countImages(imageMessages: Map<number, number[]>): number {
+  let n = 0;
+  for (const indexes of imageMessages.values()) n += indexes.length;
+  return n;
 }
 
 /** Everything the model needs up front: zones, BOQ, photos, prior assessments and ask-back answers. */

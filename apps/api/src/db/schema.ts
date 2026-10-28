@@ -202,7 +202,7 @@ export const agentRuns = pgTable("agent_runs", {
   visitId: integer("visit_id")
     .notNull()
     .references(() => visits.id, { onDelete: "cascade" }),
-  status: text("status", { enum: ["running", "finished", "needs_input", "failed"] })
+  status: text("status", { enum: ["running", "finished", "needs_input", "partial", "failed"] })
     .notNull()
     .default("running"),
   steps: integer("steps").notNull().default(0),
@@ -222,7 +222,7 @@ export const agentSteps = pgTable(
       .notNull()
       .references(() => agentRuns.id, { onDelete: "cascade" }),
     idx: integer("idx").notNull(),
-    kind: text("kind", { enum: ["model", "tool_call", "tool_result", "rejection", "error"] }).notNull(),
+    kind: text("kind", { enum: ["model", "tool_call", "tool_result", "rejection", "notice", "error"] }).notNull(),
     name: text("name"),
     payload: jsonb("payload").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
