@@ -3,6 +3,7 @@ import {
   serial,
   integer,
   text,
+  boolean,
   numeric,
   real,
   timestamp,
@@ -40,7 +41,7 @@ export const boqItems = pgTable("boq_items", {
   unit: text("unit", { enum: ["nos", "m2", "m3", "rmt", "kg"] }).notNull(),
   plannedQty: numeric("planned_qty", { mode: "number" }).notNull(),
   measureMode: text("measure_mode", { enum: ["count", "area", "visual_only"] }).notNull(),
-  samConcepts: text("sam_concepts").array().notNull().default([]),
+  segmentTargets: text("segment_targets", { enum: ["column", "brickwork"] }).array().notNull().default([]),
   sequenceNo: integer("sequence_no"),
 });
 
@@ -111,6 +112,9 @@ export const segments = pgTable(
     bbox: jsonb("bbox").$type<[number, number, number, number]>().notNull(), // [x, y, w, h] px
     areaPx: integer("area_px").notNull(),
     score: real("score").notNull(),
+    // Set by the agent via verify_segments. null = not yet checked; measure only accepts true.
+    verified: boolean("verified"),
+    rejectReason: text("reject_reason"),
   },
   (t) => [index("segments_photo_concept_idx").on(t.photoId, t.concept)],
 );
@@ -193,7 +197,7 @@ export const agentSteps = pgTable(
       .notNull()
       .references(() => agentRuns.id, { onDelete: "cascade" }),
     idx: integer("idx").notNull(),
-    kind: text("kind", { enum: ["model", "tool_call", "tool_result", "error"] }).notNull(),
+    kind: text("kind", { enum: ["model", "tool_call", "tool_result", "rejection", "error"] }).notNull(),
     name: text("name"),
     payload: jsonb("payload").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

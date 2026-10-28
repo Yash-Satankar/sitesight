@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SegmentTarget } from "./targets.js";
 
 export const Unit = z.enum(["nos", "m2", "m3", "rmt", "kg"]);
 export type Unit = z.infer<typeof Unit>;
@@ -14,7 +15,8 @@ export const BoqItemInput = z.object({
   unit: Unit,
   plannedQty: z.number().nonnegative(),
   measureMode: MeasureMode,
-  samConcepts: z.array(z.string().min(1)).max(5).default([]),
+  /** What SAM segments for this item. count/area items need one; visual_only items have []. */
+  segmentTargets: z.array(SegmentTarget).max(2).default([]),
   sequenceNo: z.number().int().nullable().default(null),
 });
 export type BoqItemInput = z.infer<typeof BoqItemInput>;

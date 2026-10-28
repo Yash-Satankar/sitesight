@@ -54,6 +54,7 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
         await tracer.step("tool_call", call.name, safeJson(call.arguments));
         const outcome = await runTool(call.name, call.arguments, ctx);
         await tracer.step("tool_result", call.name, outcome.output);
+        for (const ev of outcome.events ?? []) await tracer.step(ev.kind, ev.name, ev.payload);
         // Every call_id must get an output before the next turn, even after `finish`.
         input.push(functionCallOutput(call, outcome.output));
         if (outcome.images) pendingImages.push(...outcome.images);

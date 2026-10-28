@@ -73,7 +73,7 @@ async function seedVisit() {
     unit: "nos",
     plannedQty: 10,
     measureMode: "count",
-    samConcepts: ["concrete column"],
+    segmentTargets: ["column"],
   });
   const [visit] = await db.insert(schema.visits).values({ projectId: project!.id, status: "queued" }).returning();
   const [photo] = await db
@@ -129,11 +129,11 @@ describe("per-visit cost cap", () => {
 
   it("aborts when SAM pushes the visit over the cap, instead of returning a tool error to the model", async () => {
     const { visitId, photoId } = await seedVisit();
-    // Spark ($0.004) asks for 3 concepts. SAM: $0.0075, then $0.011 → over the cap on the 2nd request.
+    // Spark ($0.004) asks for both targets = 3 SAM prompts. SAM: $0.0075, then $0.011 → over the cap on the 2nd request.
     create.mockImplementation(async (body: { model: string }) =>
       body.model === env.SAM_MODEL
         ? samNoMatches()
-        : sparkToolCall("segment_photo", { photo_id: photoId, concepts: ["concrete column", "brick wall", "concrete slab"] }),
+        : sparkToolCall("segment_photo", { photo_id: photoId, targets: ["column", "brickwork"] }),
     );
 
     await expect(runAgent(visitId)).rejects.toBeInstanceOf(CostLimitError);
@@ -150,7 +150,7 @@ describe("per-visit cost cap", () => {
   it("concurrent SAM requests never overshoot the cap: remaining concepts are not fired", async () => {
     const { visitId, photoId } = await seedVisit();
     expect(env.SAM_CONCURRENCY).toBe(3);
-    // Spark ($0.004) asks for 5 concepts. Budget left: $0.006 → only 2 SAM requests fit ($0.0075, $0.011).
+    // Spark ($0.004) asks for both targets = 3 prompts. Budget left: $0.006 → only 2 SAM requests fit ($0.0075, $0.011).
     // SAM responses are slow, so with 3 free slots a naive limiter would have 3 requests in flight at once.
     let inFlight = 0;
     let maxInFlight = 0;
@@ -158,7 +158,7 @@ describe("per-visit cost cap", () => {
       if (body.model !== env.SAM_MODEL) {
         return sparkToolCall("segment_photo", {
           photo_id: photoId,
-          concepts: ["concrete column", "brick wall", "concrete slab", "steel rebar", "measuring tape"],
+          targets: ["column", "brickwork"],
         });
       }
       inFlight++;
@@ -170,12 +170,12 @@ describe("per-visit cost cap", () => {
 
     await expect(runAgent(visitId)).rejects.toBeInstanceOf(CostLimitError);
 
-    expect(callsTo(env.SAM_MODEL)).toBe(2); // not 3 (the concurrency limit), not 5 (all concepts)
+    expect(callsTo(env.SAM_MODEL)).toBe(2); // not 3 (all prompts, and the concurrency limit)
     expect(maxInFlight).toBe(2); // the two affordable requests did run in parallel
     const sentConcepts = create.mock.calls
       .filter(([body]) => body.model === env.SAM_MODEL)
       .map(([body]) => body.input[0].content[0].text);
-    expect(sentConcepts).toEqual(["concrete column", "brick wall"]);
+    expect(sentConcepts).toEqual(["concrete column", "exposed brick wall"]);
     const { run, steps } = await latestRun(visitId);
     expect(run.costUsd).toBeCloseTo(0.011, 6); // both in-flight requests billed, nothing more
     expect(steps.map((s) => `${s.kind}:${s.name ?? ""}`)).toEqual(["model:", "tool_call:segment_photo", "error:cost_limit"]);

@@ -1,0 +1,1 @@
+ALTER TABLE "boq_items" DROP COLUMN "sam_concepts";

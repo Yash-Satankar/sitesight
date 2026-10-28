@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import { BoqParseResult, type BoqItemInput } from "@sitesight/shared";
 import { respondJson } from "../meta/spark.js";
 import { BOQ_PARSE_INSTRUCTIONS } from "../agent/prompts.js";
+import { normalizeBoqItem } from "./boq-rules.js";
 
 const ROWS_PER_CHUNK = 80;
 
@@ -16,8 +17,13 @@ export async function parseBoq(xlsx: Buffer): Promise<{ items: BoqItemInput[]; w
     const chunk = rows.slice(i, i + ROWS_PER_CHUNK);
     const text = chunk.map((r) => r.join(" | ")).join("\n");
     const result = await respondJson(BoqParseResult, BOQ_PARSE_INSTRUCTIONS, text);
-    items.push(...result.items.map((it) => ({ ...it, zoneId: null })));
     warnings.push(...result.warnings);
+    for (const raw of result.items) {
+      // The model sometimes asks to segment things SAM cannot find reliably; fall back to visual_only.
+      const { item, warning } = normalizeBoqItem({ ...raw, zoneId: null });
+      items.push(item);
+      if (warning) warnings.push(warning);
+    }
   }
   return { items, warnings };
 }

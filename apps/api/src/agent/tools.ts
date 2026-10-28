@@ -1,11 +1,20 @@
 import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { ToolArgs, TOOL_NAMES, type ToolName, type ScaleReference } from "@sitesight/shared";
+import {
+  SegmentTarget,
+  ToolArgs,
+  TOOL_NAMES,
+  type AgentStepKind,
+  type RejectionPayload,
+  type ScaleReference,
+  type ToolName,
+} from "@sitesight/shared";
 import { env } from "../config.js";
 import { db, schema } from "../db/client.js";
 import type { SparkTool } from "../meta/spark.js";
 import { CostLimitError } from "../meta/cost.js";
-import { segment as samSegment } from "../meta/sam.js";
+import { segment as samSegment, type Segment } from "../meta/sam.js";
+import { SEGMENT_TARGETS, segmentTargets } from "./concepts.js";
 import { loadNormalizedPhoto, toDataUrl } from "../services/images.js";
 import { drawMasks } from "../services/overlay.js";
 import { measure as measureSegments } from "../services/measure.js";
@@ -22,15 +31,21 @@ export interface ToolOutcome {
   /** Images to show the model after the tool result (as data URLs). */
   images?: { photoId: number; dataUrl: string }[];
   done?: boolean;
+  /** Extra trace steps to record after the tool result (e.g. one `rejection` step per rejected segment). */
+  events?: { kind: AgentStepKind; name: string; payload: unknown }[];
 }
 
 const DESCRIPTIONS: Record<ToolName, string> = {
-  list_boq_items: "List BOQ items (optionally for one zone) with unit, planned_qty, measure_mode and SAM concepts.",
+  list_boq_items:
+    "List BOQ items (optionally for one zone) with unit, planned_qty, measure_mode and segment_targets (what segment_photo can find for the item).",
   list_photos: "List photos in this visit (optionally for one zone) with transcript and whether segments exist.",
-  view_photo: "Look at a photo. with_masks=true overlays existing segmentation masks labelled #<segment_id>.",
-  segment_photo: "Run SAM 3.1 on a photo for up to 5 concepts. Returns instances per concept with segment ids, areas and scores. Cached.",
+  view_photo:
+    "Look at a photo. with_masks=true overlays this photo's masks, each labelled #<segment_id> <target>; rejected segments are hidden.",
+  segment_photo: `Run SAM 3.1 on a photo for measure targets (${SegmentTarget.options.join(", ")}). Returns instances per target with segment ids, areas and scores. Cached. Every instance must then be checked with view_photo(with_masks=true) + verify_segments before measure.`,
+  verify_segments:
+    "Accept or reject segments of one photo after looking at the masks. Reject anything that is not the structure being assessed, with a short reason. measure only accepts accepted (verified) segments.",
   measure:
-    "Convert segments to a count and approximate area in m² using a scale reference visible in the same photo. Pure code, no model.",
+    "Convert verified segments to a count and approximate area in m² using a scale reference visible in the same photo. Pure code, no model. Fails for unverified or rejected segments.",
   get_previous_assessment: "Get the last engineer-accepted assessment of a BOQ item from an earlier visit.",
   record_assessment: "Record (or overwrite) the progress assessment for one BOQ item in this visit, with evidence.",
   request_photo:
@@ -98,7 +113,7 @@ const handlers: Handlers = {
         unit: r.unit,
         planned_qty: r.plannedQty,
         measure_mode: r.measureMode,
-        sam_concepts: r.samConcepts,
+        segment_targets: r.segmentTargets,
       })),
     };
   },
@@ -137,35 +152,117 @@ const handlers: Handlers = {
     const photo = await getPhoto(photo_id, ctx);
     const img = await loadNormalizedPhoto(photo.storageKey);
     let buffer = img.buffer;
-    let legend: { segment_id: number; concept: string; score: number }[] = [];
+    let legend: { segment_id: number; target: string; score: number; verified: boolean | null }[] = [];
+    let hiddenRejected = 0;
     if (with_masks) {
-      const segs = await db.select().from(schema.segments).where(eq(schema.segments.photoId, photo.id));
+      const all = await db.select().from(schema.segments).where(eq(schema.segments.photoId, photo.id)).orderBy(schema.segments.id);
+      const segs = all.filter((s) => s.verified !== false);
+      hiddenRejected = all.length - segs.length;
       if (segs.length) {
+        // Labels carry the segment id so the model can reference it in verify_segments / measure.
         const masks = await Promise.all(
-          segs.map(async (s) => ({ mask: await getObject(s.maskKey), bbox: s.bbox, label: `#${s.id} ${s.concept}` })),
+          segs.map(async (s) => ({
+            mask: await getObject(s.maskKey),
+            bbox: s.bbox,
+            label: `#${s.id} ${s.concept}${s.verified ? " (ok)" : ""}`,
+          })),
         );
         buffer = await drawMasks(buffer, masks);
-        legend = segs.map((s) => ({ segment_id: s.id, concept: s.concept, score: s.score }));
+        legend = segs.map((s) => ({ segment_id: s.id, target: s.concept, score: round2(s.score), verified: s.verified }));
       }
     }
     return {
-      output: { photo_id: photo.id, width: img.width, height: img.height, mask_legend: legend, note: "Image follows." },
+      output: {
+        photo_id: photo.id,
+        width: img.width,
+        height: img.height,
+        mask_legend: legend,
+        hidden_rejected_segments: hiddenRejected,
+        note: "Image follows.",
+      },
       images: [{ photoId: photo.id, dataUrl: toDataUrl(buffer) }],
     };
   },
 
-  async segment_photo({ photo_id, concepts }, ctx) {
+  async segment_photo({ photo_id, targets }, ctx) {
     const photo = await getPhoto(photo_id, ctx);
-    const segs = await ensureSegments(photo, concepts, ctx);
+    const segs = await ensureSegments(photo, targets, ctx);
     return {
-      output: concepts.map((concept) => {
-        const mine = segs.filter((s) => s.concept === concept);
-        return {
-          concept,
-          instance_count: mine.length,
-          instances: mine.map((s) => ({ segment_id: s.id, area_px: s.areaPx, score: round2(s.score), bbox: s.bbox })),
-        };
-      }),
+      output: {
+        targets: targets.map((target) => {
+          const mine = segs.filter((s) => s.concept === target);
+          return {
+            target,
+            instance_count: mine.length,
+            instances: mine.map((s) => ({
+              segment_id: s.id,
+              area_px: s.areaPx,
+              score: round2(s.score),
+              bbox: s.bbox,
+              verified: s.verified,
+            })),
+          };
+        }),
+        next_step: `View the masks with view_photo(photo_id=${photo.id}, with_masks=true) and call verify_segments for every unverified instance before measure.`,
+      },
+    };
+  },
+
+  async verify_segments({ photo_id, decisions }, ctx) {
+    const photo = await getPhoto(photo_id, ctx);
+    const ids = decisions.map((d) => d.segment_id);
+    const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+    if (dupes.length) return { output: { error: `Duplicate segment_ids in decisions: ${dupes.join(", ")}` } };
+    const noReason = decisions.filter((d) => !d.keep && !d.reason.trim()).map((d) => d.segment_id);
+    if (noReason.length) return { output: { error: `Give a reason for every rejection (segment_ids ${noReason.join(", ")}).` } };
+
+    const rows = await db
+      .select()
+      .from(schema.segments)
+      .where(and(eq(schema.segments.photoId, photo.id), inArray(schema.segments.id, ids)));
+    const onPhoto = new Set(rows.map((r) => r.id));
+    const foreign = ids.filter((id) => !onPhoto.has(id));
+    if (foreign.length) {
+      // Nothing is updated: a decision about the wrong photo's segment is a model mistake, not a partial success.
+      return {
+        output: {
+          error: `segment_ids ${foreign.join(", ")} are not segments of photo ${photo.id}. Only verify ids that segment_photo returned for this photo. No decisions were saved.`,
+        },
+      };
+    }
+
+    await db.transaction(async (tx) => {
+      for (const d of decisions) {
+        await tx
+          .update(schema.segments)
+          .set({ verified: d.keep, rejectReason: d.keep ? null : d.reason.trim() })
+          .where(eq(schema.segments.id, d.segment_id));
+      }
+    });
+
+    const remaining = await db
+      .select({ id: schema.segments.id })
+      .from(schema.segments)
+      .where(and(eq(schema.segments.photoId, photo.id), isNull(schema.segments.verified)));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const rejected = decisions.filter((d) => !d.keep);
+    return {
+      output: {
+        ok: true,
+        kept: decisions.filter((d) => d.keep).map((d) => d.segment_id),
+        rejected: rejected.map((d) => d.segment_id),
+        unverified_remaining: remaining.map((r) => r.id),
+      },
+      events: rejected.map((d) => ({
+        kind: "rejection" as const,
+        name: "verify_segments",
+        payload: {
+          photo_id: photo.id,
+          segment_id: d.segment_id,
+          target: byId.get(d.segment_id)!.concept,
+          reason: d.reason.trim(),
+        } satisfies RejectionPayload,
+      })),
     };
   },
 
@@ -175,8 +272,22 @@ const handlers: Handlers = {
       .select()
       .from(schema.segments)
       .where(and(eq(schema.segments.photoId, photo.id), inArray(schema.segments.id, segment_ids)));
-    if (targets.length !== segment_ids.length) {
+    if (targets.length !== new Set(segment_ids).size) {
       return { output: { error: "Some segment_ids do not belong to this photo." } };
+    }
+    const pending = targets.filter((t) => t.verified == null).map((t) => t.id);
+    const rejected = targets.filter((t) => t.verified === false);
+    if (pending.length || rejected.length) {
+      const parts = ["measure only accepts verified segments."];
+      if (pending.length) {
+        parts.push(
+          `Segments ${pending.join(", ")} are not verified yet: call view_photo(photo_id=${photo.id}, with_masks=true), then verify_segments for photo ${photo.id} first.`,
+        );
+      }
+      if (rejected.length) {
+        parts.push(`Segments ${rejected.map((r) => `${r.id} (${r.rejectReason})`).join(", ")} were rejected; leave them out.`);
+      }
+      return { output: { error: parts.join(" ") } };
     }
     const refSegs = await ensureSegments(photo, [REFERENCE_CONCEPT[reference]], ctx);
     const ref = refSegs.sort((a, b) => b.score - a.score)[0] ?? null;
@@ -312,18 +423,30 @@ async function getPhoto(photoId: number, ctx: ToolContext): Promise<PhotoRow> {
   return photo;
 }
 
-/** Run SAM only for concepts not already queried on this photo; return all segments for `concepts`. */
-async function ensureSegments(photo: PhotoRow, concepts: string[], ctx: ToolContext): Promise<SegmentRow[]> {
+/**
+ * Run SAM only for keys not already queried on this photo; return all segments for `keys`.
+ * A key is a measure target ("column", "brickwork": prompt variants + IoU merge, see concepts.ts)
+ * or a raw prompt (scale references in measure). Segments are stored under their key.
+ */
+async function ensureSegments(photo: PhotoRow, keys: string[], ctx: ToolContext): Promise<SegmentRow[]> {
   const done = await db
     .select({ concept: schema.segmentQueries.concept })
     .from(schema.segmentQueries)
-    .where(and(eq(schema.segmentQueries.photoId, photo.id), inArray(schema.segmentQueries.concept, concepts)));
+    .where(and(eq(schema.segmentQueries.photoId, photo.id), inArray(schema.segmentQueries.concept, keys)));
   const doneSet = new Set(done.map((d) => d.concept));
-  const missing = concepts.filter((c) => !doneSet.has(c));
+  const missing = keys.filter((c) => !doneSet.has(c));
 
   if (missing.length) {
     const img = await loadNormalizedPhoto(photo.storageKey);
-    const found = await samSegment(img.buffer, missing, { runId: ctx.runId });
+    const missingTargets = missing.filter((k): k is SegmentTarget => k in SEGMENT_TARGETS);
+    const missingPrompts = missing.filter((k) => !(k in SEGMENT_TARGETS));
+    const found: Segment[] = [];
+    if (missingTargets.length) {
+      const byTarget = await segmentTargets(img.buffer, missingTargets, { runId: ctx.runId });
+      for (const segs of byTarget.values()) found.push(...segs);
+    }
+    if (missingPrompts.length) found.push(...(await samSegment(img.buffer, missingPrompts, { runId: ctx.runId })));
+
     for (const s of found) {
       const maskKey = newKey(`masks/${photo.id}`, "image/png");
       await putObject(maskKey, s.mask, "image/png");
@@ -346,7 +469,7 @@ async function ensureSegments(photo: PhotoRow, concepts: string[], ctx: ToolCont
   return db
     .select()
     .from(schema.segments)
-    .where(and(eq(schema.segments.photoId, photo.id), inArray(schema.segments.concept, concepts)))
+    .where(and(eq(schema.segments.photoId, photo.id), inArray(schema.segments.concept, keys)))
     .orderBy(schema.segments.concept, schema.segments.instanceIdx);
 }
 

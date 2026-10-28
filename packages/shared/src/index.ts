@@ -1,3 +1,4 @@
+export * from "./schemas/targets.js";
 export * from "./schemas/boq.js";
 export * from "./schemas/assessment.js";
 export * from "./schemas/agent.js";

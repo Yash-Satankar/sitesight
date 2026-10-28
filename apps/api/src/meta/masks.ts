@@ -12,6 +12,63 @@ export interface FrameMask {
   areaPx: number;
 }
 
+/** Intersection-over-union of two full-frame masks. Boxes that don't overlap short-circuit to 0. */
+export async function maskIoU(
+  a: { mask: Buffer; bbox: BBox },
+  b: { mask: Buffer; bbox: BBox },
+  cache = new Map<Buffer, Uint8Array>(),
+): Promise<number> {
+  if (!bboxesOverlap(a.bbox, b.bbox)) return 0;
+  const [pa, pb] = await Promise.all([rawPixels(a.mask, cache), rawPixels(b.mask, cache)]);
+  if (pa.length !== pb.length) throw new Error("maskIoU: masks are different sizes");
+  let inter = 0;
+  let union = 0;
+  for (let i = 0; i < pa.length; i++) {
+    const x = pa[i]! > 0;
+    const y = pb[i]! > 0;
+    if (x && y) inter++;
+    if (x || y) union++;
+  }
+  return union ? inter / union : 0;
+}
+
+/**
+ * Collapse duplicate instances: when two masks overlap with IoU > threshold, keep the higher-scoring one.
+ * Used to merge results from several prompt variants for the same target. Returns survivors by score, highest first.
+ */
+export async function mergeOverlapping<T extends { mask: Buffer; bbox: BBox; score: number }>(
+  items: T[],
+  threshold: number,
+): Promise<T[]> {
+  const cache = new Map<Buffer, Uint8Array>();
+  const kept: T[] = [];
+  for (const candidate of [...items].sort((x, y) => y.score - x.score)) {
+    let duplicate = false;
+    for (const k of kept) {
+      if ((await maskIoU(candidate, k, cache)) > threshold) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (!duplicate) kept.push(candidate);
+  }
+  return kept;
+}
+
+function bboxesOverlap([ax, ay, aw, ah]: BBox, [bx, by, bw, bh]: BBox): boolean {
+  return ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
+}
+
+async function rawPixels(png: Buffer, cache: Map<Buffer, Uint8Array>): Promise<Uint8Array> {
+  let px = cache.get(png);
+  if (!px) {
+    const buf = await sharp(png).extractChannel(0).raw().toBuffer();
+    px = new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
+    cache.set(png, px);
+  }
+  return px;
+}
+
 /**
  * Paste a box-local raster (row-major 0/1, rasterWidth × rasterHeight) into a frameWidth × frameHeight
  * canvas at (left, top). Pixels outside the frame are clipped.

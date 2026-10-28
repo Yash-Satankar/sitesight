@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SegmentTarget } from "./targets.js";
 
 /** Visit state machine — see DESIGN.md §5. */
 export const VisitStatus = z.enum([
@@ -15,8 +16,16 @@ export type VisitStatus = z.infer<typeof VisitStatus>;
 export const AgentRunStatus = z.enum(["running", "finished", "needs_input", "failed"]);
 export type AgentRunStatus = z.infer<typeof AgentRunStatus>;
 
-export const AgentStepKind = z.enum(["model", "tool_call", "tool_result", "error"]);
+/** `rejection`: the agent rejected a SAM segment in verify_segments (payload: RejectionPayload). */
+export const AgentStepKind = z.enum(["model", "tool_call", "tool_result", "rejection", "error"]);
 export type AgentStepKind = z.infer<typeof AgentStepKind>;
+
+export interface RejectionPayload {
+  photo_id: number;
+  segment_id: number;
+  target: string;
+  reason: string;
+}
 
 /** One row of agent_steps; also the payload of each SSE event on /visits/:id/trace. */
 export const AgentStep = z.object({
@@ -40,7 +49,19 @@ export const ToolArgs = {
   view_photo: z.object({ photo_id: z.number().int(), with_masks: z.boolean().optional() }),
   segment_photo: z.object({
     photo_id: z.number().int(),
-    concepts: z.array(z.string().min(1)).min(1).max(5),
+    targets: z.array(SegmentTarget).min(1).max(SegmentTarget.options.length),
+  }),
+  verify_segments: z.object({
+    photo_id: z.number().int(),
+    decisions: z
+      .array(
+        z.object({
+          segment_id: z.number().int(),
+          keep: z.boolean(),
+          reason: z.string().describe("Required when keep=false, e.g. 'scaffolding pole'."),
+        }),
+      )
+      .min(1),
   }),
   measure: z.object({
     photo_id: z.number().int(),

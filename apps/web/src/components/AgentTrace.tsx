@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
-import type { AgentStep } from "@sitesight/shared";
+import type { AgentStep, RejectionPayload } from "@sitesight/shared";
 
 const KIND_STYLE: Record<AgentStep["kind"], string> = {
   model: "border-violet-300 bg-violet-50",
   tool_call: "border-blue-300 bg-blue-50",
   tool_result: "border-gray-200 bg-white",
+  rejection: "border-amber-400 bg-amber-50 text-amber-900",
   error: "border-red-400 bg-red-50 text-red-800",
 };
 
@@ -34,6 +35,14 @@ function StepBody({ step }: { step: AgentStep }) {
   const p = step.payload as Record<string, unknown> | null;
   if (step.kind === "error" && p) {
     return <p className="font-medium">{String(p.message ?? "Run failed")}</p>;
+  }
+  if (step.kind === "rejection" && p) {
+    const r = p as unknown as RejectionPayload;
+    return (
+      <p>
+        Rejected segment <strong>#{r.segment_id}</strong> ({r.target}) on photo {r.photo_id}: {r.reason}
+      </p>
+    );
   }
   if (step.kind === "model" && p) {
     const text = typeof p.text === "string" ? p.text : "";

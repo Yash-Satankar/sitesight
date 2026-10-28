@@ -71,7 +71,7 @@ projectsRouter.get("/projects/:id", async (req, res) => {
       unit: b.unit,
       plannedQty: b.plannedQty,
       measureMode: b.measureMode,
-      samConcepts: b.samConcepts,
+      segmentTargets: b.segmentTargets,
       sequenceNo: b.sequenceNo,
     })),
     visits: visits.map(toVisitSummary),

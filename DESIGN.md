@@ -87,6 +87,7 @@ sitesight/
 │  │  │  ├─ agent/
 │  │  │  │  ├─ run.ts         # the agent loop
 │  │  │  │  ├─ tools.ts       # tool JSON schemas + handlers
+│  │  │  │  ├─ concepts.ts    # segment targets → SAM prompt variants, IoU merge
 │  │  │  │  ├─ prompts.ts     # system prompt + templates
 │  │  │  │  └─ trace.ts       # writes agent_steps, emits SSE
 │  │  │  └─ worker/
@@ -115,7 +116,7 @@ boq_items     (id, project_id, zone_id NULL, code, description,
                unit,                 -- 'nos' | 'm2' | 'm3' | 'rmt' | 'kg'
                planned_qty NUMERIC,
                measure_mode,         -- 'count' | 'area' | 'visual_only'
-               sam_concepts TEXT[],  -- e.g. {'concrete column'}
+               segment_targets TEXT[], -- {'column'} | {'brickwork'} | {} (visual_only), see §7
                sequence_no INT NULL) -- for out-of-order detection (stretch)
 
 visits        (id, project_id, visit_date,
@@ -127,9 +128,11 @@ photos        (id, visit_id, zone_id, storage_key, width, height,
                ask_back_id NULL,     -- set if uploaded in response to an ask-back
                created_at)
 
-segments      (id, photo_id, concept, instance_idx,
+segments      (id, photo_id, concept, instance_idx,  -- concept = target name or reference prompt
                mask_key,             -- PNG mask in storage
-               bbox JSONB, area_px INT, score REAL)
+               bbox JSONB, area_px INT, score REAL,
+               verified BOOL NULL,   -- set by verify_segments; measure needs true
+               reject_reason TEXT NULL)
 
 assessments   (id, visit_id, boq_item_id,
                percent_complete REAL, qty_done NUMERIC NULL,
@@ -149,7 +152,7 @@ agent_runs    (id, visit_id, status, steps INT,
                input_tokens INT, output_tokens INT, cost_usd NUMERIC,
                started_at, finished_at, error TEXT NULL)
 
-agent_steps   (id, run_id, idx, kind,  -- 'model' | 'tool_call' | 'tool_result'
+agent_steps   (id, run_id, idx, kind,  -- 'model' | 'tool_call' | 'tool_result' | 'rejection' | 'error'
                name TEXT NULL, payload JSONB, created_at)
 
 jobs          (id, kind, payload JSONB, status, attempts, run_after, locked_at)
@@ -205,40 +208,61 @@ Images go to Spark as base64 (resized to ≤1600px long edge with sharp), not pu
 load visit context (zones, BOQ items, photos, transcripts, prior assessments, ask-back answers)
 messages = [system, context]
 for step in 1..MAX_AGENT_STEPS:
+    check visit budget (cost.ts) → abort with a cost_limit trace step if exhausted
     resp = spark.respond(messages, tools)
     trace(resp)
     if no tool calls: nudge once ("call finish or request_photo"), then fail the run
     for each tool call:
         validate args with zod → on failure return the error to the model as a tool result
-        result = handler(args); trace(result)
+        result = handler(args); trace(result); trace(result.events)   # e.g. one `rejection` step per rejected segment
         if tool == finish: end run
 messages += tool results
 ```
+
+### Segment targets (`concepts.ts`)
+SAM only segments two **targets**. Each target runs every prompt variant listed for it; instances from different variants whose mask IoU > 0.5 are the same object, and the higher-score one is kept. Segments are stored under the target name, not the prompt.
+
+| Target | SAM prompts | BOQ measure_mode |
+|---|---|---|
+| `column` | "concrete column" | `count` |
+| `brickwork` | "exposed brick wall", "brickwork" | `area` |
+
+Chosen from the day-1 spike (`pnpm sam-spike`, 19 site photos). Not segmented, because SAM was unreliable on them: **rebar** (best prompt hit 1/19 photos) and **slab** (best prompt 8/19, mean score 0.58). BOQ items for rebar, slabs and everything else without a target (plaster, openings, waterproofing, …) use `measure_mode = 'visual_only'`. `boq_items.segment_targets` links an item to its target; count/area items must have a matching target (enforced on BOQ parse and save).
+
+### Verify before measure
+SAM also finds things that look like the target: scaffolding poles, trees, steel columns, safety nets/tarps, neighbouring buildings. So every instance is checked by the agent before it counts:
+1. `segment_photo(photo_id, targets)` → instances with segment ids, `verified = null`.
+2. `view_photo(photo_id, with_masks=true)` → overlay labelled `#<segment_id> <target>`; rejected masks are hidden.
+3. `verify_segments(photo_id, decisions)` → `keep` or reject each instance, with a short reason for rejections (stored in `segments.reject_reason`). Each rejection is its own `rejection` trace step, shown in the UI. Ids from another photo fail the whole call; nothing is saved.
+4. `measure` only accepts segments with `verified = true`; otherwise it returns an error telling the model to verify first.
 
 ### Tools
 
 | Tool | Args | Returns | Notes |
 |---|---|---|---|
-| `list_boq_items` | `zone_id?` | items with unit, planned_qty, measure_mode, concepts | |
+| `list_boq_items` | `zone_id?` | items with unit, planned_qty, measure_mode, segment_targets | |
 | `list_photos` | `zone_id?` | id, zone, transcript, has_segments | |
-| `view_photo` | `photo_id`, `with_masks?: bool` | image (as input_image) + mask legend | Overlay drawn by `overlay.ts` |
-| `segment_photo` | `photo_id`, `concepts: string[]` (≤5) | per concept: instance count, areas_px, scores | Calls SAM 3.1, cached |
-| `measure` | `photo_id`, `segment_ids`, `reference: 'a4' \| 'tape_1m' \| 'brick'` | count, area_m2 (approx), scale_confidence | Pure code, no model |
+| `view_photo` | `photo_id`, `with_masks?: bool` | image (as input_image) + mask legend (segment id, target, score, verified) | Overlay drawn by `overlay.ts`, labels `#<segment_id>`; rejected masks hidden |
+| `segment_photo` | `photo_id`, `targets: ('column' \| 'brickwork')[]` | per target: instances with segment ids, areas_px, scores, verified | All prompt variants via SAM 3.1 (concurrent, budget-gated), IoU-merged, cached per (photo, target) |
+| `verify_segments` | `photo_id`, `decisions: [{segment_id, keep, reason}]` | kept, rejected, unverified_remaining | Reason required for rejections; all-or-nothing |
+| `measure` | `photo_id`, `segment_ids`, `reference: 'a4' \| 'tape_1m' \| 'brick'` | count, area_m2 (approx), scale_confidence | Pure code, no model. Verified segments only |
 | `get_previous_assessment` | `boq_item_id` | last accepted assessment | |
 | `record_assessment` | `boq_item_id, percent_complete, qty_done?, confidence, rationale, evidence: [{photo_id, segment_ids}], deviation?` | ok | Upsert per visit |
 | `request_photo` | `zone_id, boq_item_id?, instruction, reason` | ask_back_id | Instruction must be physically specific |
 | `finish` | `summary` | — | Ends run |
 
 ### Measurement approach (`services/measure.ts`)
-- **count** items (columns, openings, slabs poured): instance count from SAM, deduped across photos of the same zone by asking Spark to confirm overlaps.
-- **area** items (brickwork, plaster): segment the reference object (A4 sheet = 0.0624 m², 1 m tape) → px²→m² ratio → apply to target masks. Ignores perspective, so `scale_confidence` drops if the reference is far from the target or heavily skewed. Documented limitation.
-- **visual_only** items: Spark judges stage from the image (e.g. "shuttering done, not cast"). Confidence is capped at 0.7.
+- **count** items (columns): verified `column` instances, deduped across photos of the same zone by asking Spark to confirm overlaps.
+- **area** items (brickwork): segment the reference object (A4 sheet = 0.0624 m², 1 m tape, brick) → px²→m² ratio → apply to verified `brickwork` masks. Ignores perspective, so `scale_confidence` drops if the reference is far from the target or heavily skewed. Documented limitation. Note: in the spike, no tape or A4 prompt found anything in any photo, so area needs photos taken with a visible reference (ask-back) or a different scale source.
+- **visual_only** items (rebar, slab, plaster, openings, …): Spark judges stage from the image (e.g. "shuttering done, not cast"). Confidence is capped at 0.7.
 
 ### System prompt principles (`prompts.ts`)
 - You are a site progress auditor. Every claim must cite photo + segment evidence.
-- Prefer `segment_photo` + `measure` over eyeballing whenever measure_mode is count/area.
+- `segment_photo` only finds the targets above; everything else is visual_only.
+- After segmenting, view the masks and verify every instance; reject scaffolding poles, trees, steel columns, nets/tarps and anything not part of the structure being assessed, with a short reason.
+- Use verified segments + `measure` over eyeballing whenever measure_mode is count/area.
 - If confidence < `ASK_BACK_THRESHOLD`, call `request_photo` with an instruction a site engineer can follow in 30 seconds.
-- Never invent BOQ items. Never exceed 100%.
+- Never invent BOQ items, photo ids or segment ids. Never exceed 100%.
 
 ---
 

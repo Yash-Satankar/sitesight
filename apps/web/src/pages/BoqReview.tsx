@@ -1,8 +1,21 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { MeasureMode, Unit, type BoqItemInput } from "@sitesight/shared";
+import { Unit, type BoqItemInput } from "@sitesight/shared";
 import { api } from "../lib/api";
 import { ErrorNote } from "../components/Layout";
+
+// Only columns (count) and brickwork (area) can be measured from photos; the API rejects other combinations.
+const MEASURED_AS = {
+  visual_only: { label: "Visual check only", patch: { measureMode: "visual_only", segmentTargets: [] } },
+  column: { label: "Count columns", patch: { measureMode: "count", segmentTargets: ["column"] } },
+  brickwork: { label: "Area of brickwork", patch: { measureMode: "area", segmentTargets: ["brickwork"] } },
+} satisfies Record<string, { label: string; patch: Pick<BoqItemInput, "measureMode" | "segmentTargets"> }>;
+
+function measuredAs(it: BoqItemInput): keyof typeof MEASURED_AS {
+  if (it.measureMode === "count" && it.segmentTargets.includes("column")) return "column";
+  if (it.measureMode === "area" && it.segmentTargets.includes("brickwork")) return "brickwork";
+  return "visual_only";
+}
 
 export function BoqReviewPage() {
   const projectId = Number(useParams().projectId);
@@ -69,8 +82,7 @@ export function BoqReviewPage() {
                 <th className="p-1">Description</th>
                 <th className="p-1">Unit</th>
                 <th className="p-1">Planned qty</th>
-                <th className="p-1">Measure mode</th>
-                <th className="p-1">SAM concepts (comma-separated)</th>
+                <th className="p-1">Measured as</th>
               </tr>
             </thead>
             <tbody>
@@ -97,28 +109,15 @@ export function BoqReviewPage() {
                   <td className="p-1">
                     <select
                       className="input"
-                      value={it.measureMode}
-                      onChange={(e) => update(i, { measureMode: e.target.value as MeasureMode })}
+                      value={measuredAs(it)}
+                      onChange={(e) => update(i, MEASURED_AS[e.target.value as keyof typeof MEASURED_AS].patch)}
                     >
-                      {MeasureMode.options.map((m) => (
-                        <option key={m}>{m}</option>
+                      {Object.entries(MEASURED_AS).map(([key, opt]) => (
+                        <option key={key} value={key}>
+                          {opt.label}
+                        </option>
                       ))}
                     </select>
-                  </td>
-                  <td className="p-1">
-                    <input
-                      className="input"
-                      value={it.samConcepts.join(", ")}
-                      onChange={(e) =>
-                        update(i, {
-                          samConcepts: e.target.value
-                            .split(",")
-                            .map((s) => s.trim())
-                            .filter(Boolean)
-                            .slice(0, 5),
-                        })
-                      }
-                    />
                   </td>
                 </tr>
               ))}

@@ -5,6 +5,7 @@ import { SaveBoqBody, type ParsedBoqResponse } from "@sitesight/shared";
 import { db, schema } from "../db/client.js";
 import { HttpError, intParam, notFound, parse } from "../lib/http.js";
 import { parseBoq } from "../services/boq-parser.js";
+import { boqItemProblem } from "../services/boq-rules.js";
 
 export const boqRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -25,6 +26,11 @@ boqRouter.post("/projects/:id/boq", upload.single("file"), async (req, res) => {
 boqRouter.put("/projects/:id/boq", async (req, res) => {
   const projectId = intParam(req.params.id);
   const { items } = parse(SaveBoqBody, req.body);
+  const problems = items.flatMap((it) => {
+    const p = boqItemProblem(it);
+    return p ? [`${it.code}: ${p}`] : [];
+  });
+  if (problems.length) throw new HttpError(400, "Inconsistent BOQ items", problems);
   const [p] = await db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!p) notFound("Project");
 
