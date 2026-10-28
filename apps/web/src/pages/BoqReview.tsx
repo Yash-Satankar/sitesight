@@ -6,10 +6,10 @@ import { ErrorNote } from "../components/Layout";
 
 // Only columns (count) and brickwork (area) can be measured from photos; the API rejects other combinations.
 const MEASURED_AS = {
-  visual_only: { label: "Visual check only", patch: { measureMode: "visual_only", segmentTargets: [] } },
-  column: { label: "Count columns", patch: { measureMode: "count", segmentTargets: ["column"] } },
+  visual_only: { label: "Visual check only", patch: { measureMode: "visual_only", segmentTargets: [], panelPlannedQty: null } },
+  column: { label: "Count columns", patch: { measureMode: "count", segmentTargets: ["column"], panelPlannedQty: null } },
   brickwork: { label: "Area of brickwork", patch: { measureMode: "area", segmentTargets: ["brickwork"] } },
-} satisfies Record<string, { label: string; patch: Pick<BoqItemInput, "measureMode" | "segmentTargets"> }>;
+} satisfies Record<string, { label: string; patch: Pick<BoqItemInput, "measureMode" | "segmentTargets"> & Partial<BoqItemInput> }>;
 
 function measuredAs(it: BoqItemInput): keyof typeof MEASURED_AS {
   if (it.measureMode === "count" && it.segmentTargets.includes("column")) return "column";
@@ -83,6 +83,7 @@ export function BoqReviewPage() {
                 <th className="p-1">Unit</th>
                 <th className="p-1">Planned qty</th>
                 <th className="p-1">Measured as</th>
+                <th className="p-1" title="Planned quantity inside one photographed panel, e.g. one brick bay between two columns">Panel qty</th>
               </tr>
             </thead>
             <tbody>
@@ -118,6 +119,20 @@ export function BoqReviewPage() {
                         </option>
                       ))}
                     </select>
+                  </td>
+                  <td className="p-1">
+                    {it.measureMode === "area" ? (
+                      <input
+                        className="input w-24"
+                        type="number"
+                        min={0}
+                        placeholder="optional"
+                        value={it.panelPlannedQty ?? ""}
+                        onChange={(e) => update(i, { panelPlannedQty: e.target.value === "" ? null : Number(e.target.value) })}
+                      />
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
                   </td>
                 </tr>
               ))}

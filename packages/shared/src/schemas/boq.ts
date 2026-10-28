@@ -17,6 +17,11 @@ export const BoqItemInput = z.object({
   measureMode: MeasureMode,
   /** What SAM segments for this item. count/area items need one; visual_only items have []. */
   segmentTargets: z.array(SegmentTarget).max(2).default([]),
+  /**
+   * Area items only: planned quantity inside one photographed panel (e.g. one brick bay between two columns).
+   * Panel measurements compute qty_done = covered fraction × this (or × plannedQty when null).
+   */
+  panelPlannedQty: z.number().positive().nullable().default(null),
   sequenceNo: z.number().int().nullable().default(null),
 });
 export type BoqItemInput = z.infer<typeof BoqItemInput>;

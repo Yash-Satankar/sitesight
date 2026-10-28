@@ -56,6 +56,26 @@ export async function drawMasks(image: Buffer, masks: OverlayMask[]): Promise<Bu
   return sharp(image).composite(layers).jpeg({ quality: 85 }).toBuffer();
 }
 
+/** Outline a polygon (e.g. a measurement panel) with a translucent fill and a label at its first point. */
+export async function drawPolygon(image: Buffer, points: [number, number][], label: string): Promise<Buffer> {
+  const meta = await sharp(image).metadata();
+  const width = meta.width ?? 0;
+  const height = meta.height ?? 0;
+  const pts = points.map(([x, y]) => `${x},${y}`).join(" ");
+  const [lx, ly] = points[0] ?? [0, 0];
+  const text = escapeXml(label);
+  const ty = Math.max(18, ly);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+<polygon points="${pts}" fill="rgba(255,214,0,0.18)" stroke="#ffd600" stroke-width="4" stroke-linejoin="round"/>
+<rect x="${lx}" y="${ty - 18}" width="${text.length * 9 + 10}" height="22" fill="#ffd600"/>
+<text x="${lx + 5}" y="${ty - 2}" font-family="sans-serif" font-size="15" font-weight="bold" fill="#000">${text}</text>
+</svg>`;
+  return sharp(image)
+    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    .jpeg({ quality: 85 })
+    .toBuffer();
+}
+
 /** Crop a bbox (with padding) for report evidence thumbnails. */
 export async function cropEvidence(image: Buffer, bbox: [number, number, number, number], pad = 0.15): Promise<Buffer> {
   const meta = await sharp(image).metadata();

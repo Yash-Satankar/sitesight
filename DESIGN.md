@@ -117,6 +117,7 @@ boq_items     (id, project_id, zone_id NULL, code, description,
                planned_qty NUMERIC,
                measure_mode,         -- 'count' | 'area' | 'visual_only'
                segment_targets TEXT[], -- {'column'} | {'brickwork'} | {} (visual_only), see §7
+               panel_planned_qty NUMERIC NULL, -- area items: planned qty in one photographed panel
                sequence_no INT NULL) -- for out-of-order detection (stretch)
 
 visits        (id, project_id, visit_date,
@@ -143,6 +144,11 @@ assessments   (id, visit_id, boq_item_id,
                engineer_note TEXT NULL)
 
 assessment_evidence (assessment_id, photo_id, segment_ids INT[])
+
+panel_measurements (id, visit_id, photo_id, run_id NULL, target_segment_ids INT[],
+               panel JSONB,          -- column pair + y-range, or 4-point polygon
+               panel_area_px INT, covered_area_px INT, fraction REAL,
+               clipped BOOL, warnings JSONB, created_at)
 
 ask_backs     (id, visit_id, zone_id, boq_item_id NULL,
                instruction TEXT, reason TEXT,
@@ -242,18 +248,24 @@ SAM also finds things that look like the target: scaffolding poles, trees, steel
 |---|---|---|---|
 | `list_boq_items` | `zone_id?` | items with unit, planned_qty, measure_mode, segment_targets | |
 | `list_photos` | `zone_id?` | id, zone, transcript, has_segments | |
-| `view_photo` | `photo_id`, `with_masks?: bool` | image (as input_image) + mask legend (segment id, target, score, verified) | Overlay drawn by `overlay.ts`, labels `#<segment_id>`; rejected masks hidden |
+| `view_photo` | `photo_id`, `with_masks?: bool`, `draw_panel?: panel` | image (as input_image) + mask legend (segment id, target, score, verified) + panel size/warnings | Overlay drawn by `overlay.ts`, labels `#<segment_id>`; rejected masks hidden; `draw_panel` outlines a panel so the model checks it before measuring |
 | `segment_photo` | `photo_id`, `targets: ('column' \| 'brickwork')[]` | per target: instances with segment ids, areas_px, scores, verified | All prompt variants via SAM 3.1 (concurrent, budget-gated), IoU-merged, cached per (photo, target) |
 | `verify_segments` | `photo_id`, `decisions: [{segment_id, keep, reason}]` | kept, rejected, unverified_remaining | Reason required for rejections; all-or-nothing |
-| `measure` | `photo_id`, `segment_ids`, `reference: 'a4' \| 'tape_1m' \| 'brick'` | count, area_m2 (approx), scale_confidence | Pure code, no model. Verified segments only |
+| `measure` | `photo_id`, `mode: 'panel' | 'reference'`; panel: `target_segment_ids`, `panel`; reference: `segment_ids`, `reference: 'a4' | 'tape_1m' | 'brick'` | panel: `measurement_id`, panel_area_px, covered_area_px, fraction, clipped, warnings. reference: count, area_m2 (approx), scale_confidence | Pure code, no model. Verified segments only. Panel results stored in `panel_measurements` |
 | `get_previous_assessment` | `boq_item_id` | last accepted assessment | |
-| `record_assessment` | `boq_item_id, percent_complete, qty_done?, confidence, rationale, evidence: [{photo_id, segment_ids}], deviation?` | ok | Upsert per visit |
+| `record_assessment` | `boq_item_id, percent_complete, qty_done?, panel_measurement_id?, confidence, rationale, evidence: [{photo_id, segment_ids}], deviation?` | ok, qty_done, qty_basis | Upsert per visit. With `panel_measurement_id` code computes qty_done (model value ignored) and adds the panel photo + targets to evidence |
 | `request_photo` | `zone_id, boq_item_id?, instruction, reason` | ask_back_id | Instruction must be physically specific |
 | `finish` | `summary` | — | Ends run |
 
 ### Measurement approach (`services/measure.ts`)
 - **count** items (columns): verified `column` instances, deduped across photos of the same zone by asking Spark to confirm overlaps.
-- **area** items (brickwork): segment the reference object (A4 sheet = 0.0624 m², 1 m tape, brick) → px²→m² ratio → apply to verified `brickwork` masks. Ignores perspective, so `scale_confidence` drops if the reference is far from the target or heavily skewed. Documented limitation. Note: in the spike, no tape or A4 prompt found anything in any photo, so area needs photos taken with a visible reference (ask-back) or a different scale source.
+- **area** items (brickwork), **panel mode (default)**: measure what fraction of one wall panel is covered, which needs no real-world scale. The day-1 spike found no usable scale reference (no tape or A4 hit in any of 19 photos), so this replaced the reference path as the default.
+  - Panel = the space between two **verified** `column` segments (x-bounds = each row's inner edges of the two column masks, so leaning columns are followed; y from `top_y` to `bottom_y` in image pixels), or a model-provided 4-point polygon. Pixel rules are shared so both forms agree: columns cover `x ∈ [inner edge L, inner edge R)`, `y ∈ [top_y, bottom_y)`; a polygon covers pixels whose centre is inside it.
+  - `covered = |union(target masks) ∩ panel|`, `fraction = covered / panel_area`. `clipped` when the panel ran past the image edge.
+  - Warnings: panel < 2% of the image; fraction > 0.98 (panel likely drawn too small); target mask mostly (> 25%) or entirely outside the panel; crossed polygon corners (reordered); columns given right-to-left (swapped).
+  - Workflow: `view_photo(draw_panel)` to check the panel → `measure(mode='panel')` → `record_assessment(panel_measurement_id)`. Code computes `qty_done = fraction × panel_planned_qty` (planned quantity inside one photographed panel, e.g. one brick bay) or `× planned_qty` when the item has none (noted in the result). The model supplies percent_complete only and never does the arithmetic; a model-supplied qty_done is ignored, and a percent far from the implied one is flagged.
+  - Limitation: the fraction is in image space, so a panel seen at a steep angle over- or under-weights near/far parts. Ask for a square-on photo when that matters.
+- **area** items, **reference mode (optional)**: segment a reference object (A4 sheet = 0.0624 m², 1 m tape, brick) → px²→m² ratio → apply to verified `brickwork` masks. Ignores perspective, so `scale_confidence` drops if the reference is far from the target or heavily skewed. Only useful when a reference is clearly in shot.
 - **visual_only** items (rebar, slab, plaster, openings, …): Spark judges stage from the image (e.g. "shuttering done, not cast"). Confidence is capped at 0.7.
 
 ### System prompt principles (`prompts.ts`)

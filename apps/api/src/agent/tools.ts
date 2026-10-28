@@ -5,6 +5,7 @@ import {
   ToolArgs,
   TOOL_NAMES,
   type AgentStepKind,
+  type PanelSpecArg,
   type RejectionPayload,
   type ScaleReference,
   type ToolName,
@@ -16,8 +17,9 @@ import { CostLimitError } from "../meta/cost.js";
 import { segment as samSegment, type Segment } from "../meta/sam.js";
 import { SEGMENT_TARGETS, segmentTargets } from "./concepts.js";
 import { loadNormalizedPhoto, toDataUrl } from "../services/images.js";
-import { drawMasks } from "../services/overlay.js";
-import { measure as measureSegments } from "../services/measure.js";
+import { drawMasks, drawPolygon } from "../services/overlay.js";
+import { buildPanel, measurePanel, measure as measureSegments, PanelError, type Panel, type Point } from "../services/measure.js";
+import { decodeMask } from "../meta/masks.js";
 import { getObject, newKey, putObject } from "../services/storage.js";
 
 export interface ToolContext {
@@ -40,14 +42,15 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     "List BOQ items (optionally for one zone) with unit, planned_qty, measure_mode and segment_targets (what segment_photo can find for the item).",
   list_photos: "List photos in this visit (optionally for one zone) with transcript and whether segments exist.",
   view_photo:
-    "Look at a photo. with_masks=true overlays this photo's masks, each labelled #<segment_id> <target>; rejected segments are hidden.",
+    "Look at a photo. with_masks=true overlays this photo's masks, each labelled #<segment_id> <target>; rejected segments are hidden. draw_panel outlines a measurement panel (same format as measure's panel) so you can check it before measuring.",
   segment_photo: `Run SAM 3.1 on a photo for measure targets (${SegmentTarget.options.join(", ")}). Returns instances per target with segment ids, areas and scores. Cached. Every instance must then be checked with view_photo(with_masks=true) + verify_segments before measure.`,
   verify_segments:
     "Accept or reject segments of one photo after looking at the masks. Reject anything that is not the structure being assessed, with a short reason. measure only accepts accepted (verified) segments.",
   measure:
-    "Convert verified segments to a count and approximate area in m² using a scale reference visible in the same photo. Pure code, no model. Fails for unverified or rejected segments.",
+    "Pure code, no model; verified segments only. mode='panel' (preferred for area items): fraction of a wall panel covered by target_segment_ids, where panel is the space between two verified columns (left_column_id, right_column_id, top_y, bottom_y) or a 4-point polygon. Returns measurement_id for record_assessment. mode='reference': count + approximate m² from a scale object (A4/tape/brick) visible in the photo.",
   get_previous_assessment: "Get the last engineer-accepted assessment of a BOQ item from an earlier visit.",
-  record_assessment: "Record (or overwrite) the progress assessment for one BOQ item in this visit, with evidence.",
+  record_assessment:
+    "Record (or overwrite) the progress assessment for one BOQ item in this visit, with evidence. For area items measured in panel mode pass panel_measurement_id: qty_done is then computed by code (fraction × the item's panel_planned_qty, or planned_qty); do not calculate it yourself.",
   request_photo:
     "Ask the site engineer for a specific extra photo when confidence is low. The instruction must be physically specific and doable in 30 seconds.",
   finish: "End the run with a short summary once all relevant items are assessed or have an open photo request.",
@@ -112,6 +115,7 @@ const handlers: Handlers = {
         zone_id: r.zoneId,
         unit: r.unit,
         planned_qty: r.plannedQty,
+        panel_planned_qty: r.panelPlannedQty,
         measure_mode: r.measureMode,
         segment_targets: r.segmentTargets,
       })),
@@ -148,7 +152,7 @@ const handlers: Handlers = {
     };
   },
 
-  async view_photo({ photo_id, with_masks }, ctx) {
+  async view_photo({ photo_id, with_masks, draw_panel }, ctx) {
     const photo = await getPhoto(photo_id, ctx);
     const img = await loadNormalizedPhoto(photo.storageKey);
     let buffer = img.buffer;
@@ -171,6 +175,17 @@ const handlers: Handlers = {
         legend = segs.map((s) => ({ segment_id: s.id, target: s.concept, score: round2(s.score), verified: s.verified }));
       }
     }
+    let panelPreview: Record<string, unknown> | undefined;
+    if (draw_panel) {
+      const { panel } = await resolvePanel(photo, draw_panel);
+      buffer = await drawPolygon(buffer, panel.outline, "PANEL");
+      panelPreview = {
+        panel_area_px: panel.areaPx,
+        share_of_image: Math.round((panel.areaPx / (panel.width * panel.height)) * 1000) / 1000,
+        clipped: panel.clipped,
+        warnings: panel.warnings,
+      };
+    }
     return {
       output: {
         photo_id: photo.id,
@@ -178,6 +193,7 @@ const handlers: Handlers = {
         height: img.height,
         mask_legend: legend,
         hidden_rejected_segments: hiddenRejected,
+        ...(panelPreview ? { panel: panelPreview } : {}),
         note: "Image follows.",
       },
       images: [{ photoId: photo.id, dataUrl: toDataUrl(buffer) }],
@@ -266,39 +282,62 @@ const handlers: Handlers = {
     };
   },
 
-  async measure({ photo_id, segment_ids, reference }, ctx) {
-    const photo = await getPhoto(photo_id, ctx);
-    const targets = await db
-      .select()
-      .from(schema.segments)
-      .where(and(eq(schema.segments.photoId, photo.id), inArray(schema.segments.id, segment_ids)));
-    if (targets.length !== new Set(segment_ids).size) {
-      return { output: { error: "Some segment_ids do not belong to this photo." } };
+  async measure(args, ctx) {
+    const photo = await getPhoto(args.photo_id, ctx);
+
+    if (args.mode === "reference") {
+      const targets = await verifiedSegments(photo, args.segment_ids!);
+      if ("error" in targets) return { output: targets };
+      const refSegs = await ensureSegments(photo, [REFERENCE_CONCEPT[args.reference!]], ctx);
+      const ref = refSegs.sort((a, b) => b.score - a.score)[0] ?? null;
+      const result = measureSegments(targets, args.reference!, ref, photo);
+      return {
+        output: {
+          mode: "reference",
+          count: result.count,
+          area_m2: result.areaM2,
+          scale_confidence: result.scaleConfidence,
+          reference_segment_id: ref?.id ?? null,
+          notes: result.notes,
+        },
+      };
     }
-    const pending = targets.filter((t) => t.verified == null).map((t) => t.id);
-    const rejected = targets.filter((t) => t.verified === false);
-    if (pending.length || rejected.length) {
-      const parts = ["measure only accepts verified segments."];
-      if (pending.length) {
-        parts.push(
-          `Segments ${pending.join(", ")} are not verified yet: call view_photo(photo_id=${photo.id}, with_masks=true), then verify_segments for photo ${photo.id} first.`,
-        );
-      }
-      if (rejected.length) {
-        parts.push(`Segments ${rejected.map((r) => `${r.id} (${r.rejectReason})`).join(", ")} were rejected; leave them out.`);
-      }
-      return { output: { error: parts.join(" ") } };
-    }
-    const refSegs = await ensureSegments(photo, [REFERENCE_CONCEPT[reference]], ctx);
-    const ref = refSegs.sort((a, b) => b.score - a.score)[0] ?? null;
-    const result = measureSegments(targets, reference, ref, photo);
+
+    // Panel mode: covered fraction of a wall panel. No real-world scale needed.
+    const targets = await verifiedSegments(photo, args.target_segment_ids!);
+    if ("error" in targets) return { output: targets };
+    const { panel, columnIds } = await resolvePanel(photo, args.panel!);
+    const rasters = await Promise.all(targets.map(async (t) => decodeMask(await getObject(t.maskKey))));
+    const m = measurePanel(rasters, panel);
+    const overlap = targets.filter((t) => columnIds.includes(t.id)).map((t) => t.id);
+    if (overlap.length) m.warnings.push(`Segments ${overlap.join(", ")} are the panel's columns; they should not be targets.`);
+
+    const [row] = await db
+      .insert(schema.panelMeasurements)
+      .values({
+        visitId: ctx.visitId,
+        photoId: photo.id,
+        runId: ctx.runId,
+        targetSegmentIds: targets.map((t) => t.id),
+        panel: args.panel!,
+        panelAreaPx: m.panelAreaPx,
+        coveredAreaPx: m.coveredAreaPx,
+        fraction: m.fraction,
+        clipped: m.clipped,
+        warnings: m.warnings,
+      })
+      .returning({ id: schema.panelMeasurements.id });
+
     return {
       output: {
-        count: result.count,
-        area_m2: result.areaM2,
-        scale_confidence: result.scaleConfidence,
-        reference_segment_id: ref?.id ?? null,
-        notes: result.notes,
+        mode: "panel",
+        measurement_id: row!.id,
+        panel_area_px: m.panelAreaPx,
+        covered_area_px: m.coveredAreaPx,
+        fraction: m.fraction,
+        clipped: m.clipped,
+        warnings: m.warnings,
+        next_step: `If the warnings are fine, call record_assessment with panel_measurement_id=${row!.id}; qty_done is computed for you.`,
       },
     };
   },
@@ -351,11 +390,41 @@ const handlers: Handlers = {
       notes.push(`Confidence capped at ${confidence} for visual_only items.`);
     }
 
+    // Panel measurement: the quantity comes from the stored fraction, never from the model's arithmetic.
+    let qtyDone = args.qty_done ?? null;
+    let qtyBasis: string | null = null;
+    let panelEvidence: { photoId: number; segmentIds: number[] } | null = null;
+    if (args.panel_measurement_id != null) {
+      const [pm] = await db.select().from(schema.panelMeasurements).where(eq(schema.panelMeasurements.id, args.panel_measurement_id));
+      if (!pm || pm.visitId !== ctx.visitId) {
+        return { output: { error: `panel_measurement_id ${args.panel_measurement_id} is not a measurement from this visit.` } };
+      }
+      if (item.measureMode !== "area") {
+        return { output: { error: `Panel measurements apply to area items; ${item.code} is measured as ${item.measureMode}.` } };
+      }
+      const basis = item.panelPlannedQty ?? item.plannedQty;
+      qtyDone = Math.round(pm.fraction * basis * 1000) / 1000;
+      qtyBasis = `${pm.fraction} × ${basis} ${item.unit} (${item.panelPlannedQty != null ? "panel_planned_qty" : "planned_qty"}) = ${qtyDone} ${item.unit}`;
+      if (item.panelPlannedQty == null) {
+        notes.push(`${item.code} has no panel_planned_qty, so the panel was taken as the whole item (${item.plannedQty} ${item.unit}).`);
+      }
+      if (args.qty_done != null && args.qty_done !== qtyDone) {
+        notes.push(`qty_done ${args.qty_done} was ignored; it is computed from the panel measurement.`);
+      }
+      if (item.plannedQty > 0) {
+        const implied = (qtyDone / item.plannedQty) * 100;
+        if (Math.abs(args.percent_complete - implied) > 10) {
+          notes.push(`percent_complete ${args.percent_complete} differs from the ${Math.round(implied)}% implied by qty_done; check it.`);
+        }
+      }
+      panelEvidence = { photoId: pm.photoId, segmentIds: pm.targetSegmentIds };
+    }
+
     const values = {
       visitId: ctx.visitId,
       boqItemId: item.id,
       percentComplete: Math.min(100, args.percent_complete),
-      qtyDone: args.qty_done ?? null,
+      qtyDone,
       confidence,
       rationale: args.rationale,
       deviation: args.deviation ?? null,
@@ -369,7 +438,11 @@ const handlers: Handlers = {
         .returning({ id: schema.assessments.id });
       await tx.delete(schema.assessmentEvidence).where(eq(schema.assessmentEvidence.assessmentId, a!.id));
       const merged = new Map<number, Set<number>>();
-      for (const e of args.evidence) {
+      const evidence = [
+        ...args.evidence,
+        ...(panelEvidence ? [{ photo_id: panelEvidence.photoId, segment_ids: panelEvidence.segmentIds }] : []),
+      ];
+      for (const e of evidence) {
         const set = merged.get(e.photo_id) ?? new Set<number>();
         e.segment_ids.forEach((id) => set.add(id));
         merged.set(e.photo_id, set);
@@ -382,7 +455,9 @@ const handlers: Handlers = {
 
     const lowConfidence = confidence < env.ASK_BACK_THRESHOLD;
     if (lowConfidence) notes.push(`Confidence is below ${env.ASK_BACK_THRESHOLD}; consider request_photo.`);
-    return { output: { ok: true, assessment_id: assessmentId, confidence, notes } };
+    return {
+      output: { ok: true, assessment_id: assessmentId, confidence, qty_done: qtyDone, ...(qtyBasis ? { qty_basis: qtyBasis } : {}), notes },
+    };
   },
 
   async request_photo(args, ctx) {
@@ -421,6 +496,51 @@ async function getPhoto(photoId: number, ctx: ToolContext): Promise<PhotoRow> {
     .where(and(eq(schema.photos.id, photoId), eq(schema.photos.visitId, ctx.visitId)));
   if (!photo) throw new Error(`photo_id ${photoId} is not in this visit`);
   return photo;
+}
+
+/** Segments of this photo with the given ids, all verified — or an error message for the model. */
+async function verifiedSegments(
+  photo: PhotoRow,
+  ids: number[],
+  what = "measure only accepts verified segments.",
+): Promise<SegmentRow[] | { error: string }> {
+  const rows = await db
+    .select()
+    .from(schema.segments)
+    .where(and(eq(schema.segments.photoId, photo.id), inArray(schema.segments.id, ids)));
+  if (rows.length !== new Set(ids).size) return { error: "Some segment_ids do not belong to this photo." };
+  const pending = rows.filter((t) => t.verified == null).map((t) => t.id);
+  const rejected = rows.filter((t) => t.verified === false);
+  if (!pending.length && !rejected.length) return rows;
+  const parts = [what];
+  if (pending.length) {
+    parts.push(
+      `Segments ${pending.join(", ")} are not verified yet: call view_photo(photo_id=${photo.id}, with_masks=true), then verify_segments for photo ${photo.id} first.`,
+    );
+  }
+  if (rejected.length) parts.push(`Segments ${rejected.map((r) => `${r.id} (${r.rejectReason})`).join(", ")} were rejected; leave them out.`);
+  return { error: parts.join(" ") };
+}
+
+/** Turn the model's panel argument into a pixel region. Throws PanelError with a message for the model. */
+async function resolvePanel(photo: PhotoRow, spec: PanelSpecArg): Promise<{ panel: Panel; columnIds: number[] }> {
+  if ("polygon" in spec) {
+    return { panel: buildPanel({ kind: "polygon", points: spec.polygon as Point[] }, photo.width, photo.height), columnIds: [] };
+  }
+  const ids = [spec.left_column_id, spec.right_column_id];
+  if (ids[0] === ids[1]) throw new PanelError("left_column_id and right_column_id must be two different columns.");
+  const cols = await verifiedSegments(photo, ids, "Panel columns must be verified segments.");
+  if ("error" in cols) throw new PanelError(cols.error);
+  const notColumns = cols.filter((c) => c.concept !== "column");
+  if (notColumns.length) {
+    throw new PanelError(`Segments ${notColumns.map((c) => `${c.id} (${c.concept})`).join(", ")} are not columns.`);
+  }
+  const mask = async (id: number) => decodeMask(await getObject(cols.find((c) => c.id === id)!.maskKey));
+  const [left, right] = await Promise.all([mask(spec.left_column_id), mask(spec.right_column_id)]);
+  return {
+    panel: buildPanel({ kind: "columns", left, right, topY: spec.top_y, bottomY: spec.bottom_y }, photo.width, photo.height),
+    columnIds: ids,
+  };
 }
 
 /**

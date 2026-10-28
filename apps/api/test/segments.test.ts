@@ -90,13 +90,18 @@ async function seed() {
   return { ctx, visitId: visit!.id, photo1: await photo(), photo2: await photo() };
 }
 
-async function insertSegment(photoId: number, concept = "column", verified: boolean | null = null) {
-  const mask = (await rasterToFrameMask(new Uint8Array(100).fill(1), 10, 10, 20, 20, 320, 334)).png;
+async function insertSegment(
+  photoId: number,
+  concept = "column",
+  verified: boolean | null = null,
+  [x, y, w, h]: [number, number, number, number] = [20, 20, 10, 10],
+) {
+  const mask = (await rasterToFrameMask(new Uint8Array(w * h).fill(1), w, h, x, y, 320, 334)).png;
   const maskKey = `masks/manual/${Math.random()}`;
   store.set(maskKey, mask);
   const [s] = await db
     .insert(schema.segments)
-    .values({ photoId, concept, instanceIdx: 0, maskKey, bbox: [20, 20, 10, 10], areaPx: 100, score: 0.8, verified })
+    .values({ photoId, concept, instanceIdx: 0, maskKey, bbox: [x, y, w, h], areaPx: w * h, score: 0.8, verified })
     .returning();
   return s!;
 }
@@ -188,7 +193,7 @@ describe("verify-before-measure", () => {
     const seg = await insertSegment(photo1.id);
     mockMeta({});
 
-    const out = await run("measure", { photo_id: photo1.id, segment_ids: [seg.id], reference: "a4" }, ctx);
+    const out = await run("measure", { photo_id: photo1.id, mode: "reference", segment_ids: [seg.id], reference: "a4" }, ctx);
 
     expect(errorOf(out)).toMatch(/measure only accepts verified segments/);
     expect(errorOf(out)).toMatch(new RegExp(`Segments ${seg.id} are not verified yet: call view_photo\\(photo_id=${photo1.id}, with_masks=true\\), then verify_segments`));
@@ -212,11 +217,11 @@ describe("verify-before-measure", () => {
     ]);
     expect(await segmentRow(bad.id)).toMatchObject({ verified: false, rejectReason: "scaffolding pole" });
 
-    const ok = await run("measure", { photo_id: photo1.id, segment_ids: [good.id], reference: "a4" }, ctx);
+    const ok = await run("measure", { photo_id: photo1.id, mode: "reference", segment_ids: [good.id], reference: "a4" }, ctx);
     expect(errorOf(ok)).toBeUndefined();
     expect(ok.output).toMatchObject({ count: 1, area_m2: null });
 
-    const refused = await run("measure", { photo_id: photo1.id, segment_ids: [good.id, bad.id], reference: "a4" }, ctx);
+    const refused = await run("measure", { photo_id: photo1.id, mode: "reference", segment_ids: [good.id, bad.id], reference: "a4" }, ctx);
     expect(errorOf(refused)).toMatch(new RegExp(`Segments ${bad.id} \\(scaffolding pole\\) were rejected`));
   });
 
@@ -292,6 +297,150 @@ describe("verify-before-measure", () => {
   });
 });
 
+describe("panel measurement (tools)", () => {
+  // Photo 320×334. Columns at x 40..59 and 260..279 → panel x [60, 260), y [50, 250): 200 × 200 = 40,000 px.
+  async function panelSetup() {
+    const s = await seed();
+    const left = await insertSegment(s.photo1.id, "column", true, [40, 0, 20, 334]);
+    const right = await insertSegment(s.photo1.id, "column", true, [260, 0, 20, 334]);
+    const halfWall = await insertSegment(s.photo1.id, "brickwork", true, [60, 150, 200, 100]); // bottom half of the panel
+    const panel = { left_column_id: left.id, right_column_id: right.id, top_y: 50, bottom_y: 250 };
+    return { ...s, left, right, halfWall, panel };
+  }
+
+  async function brickItem(projectId: number, panelPlannedQty: number | null) {
+    const [it] = await db
+      .insert(schema.boqItems)
+      .values({ projectId, code: "3.1", description: "Brick masonry", unit: "m2", plannedQty: 380, measureMode: "area", segmentTargets: ["brickwork"], panelPlannedQty })
+      .returning();
+    return it!;
+  }
+
+  it("measures the covered fraction between two verified columns and stores the measurement", async () => {
+    const { ctx, photo1, halfWall, panel } = await panelSetup();
+
+    const out = await run("measure", { photo_id: photo1.id, mode: "panel", target_segment_ids: [halfWall.id], panel }, ctx);
+
+    expect(errorOf(out)).toBeUndefined();
+    expect(out.output).toMatchObject({ mode: "panel", panel_area_px: 40000, covered_area_px: 20000, fraction: 0.5, clipped: false, warnings: [] });
+    const id = (out.output as { measurement_id: number }).measurement_id;
+    const [row] = await db.select().from(schema.panelMeasurements).where(eq(schema.panelMeasurements.id, id));
+    expect(row).toMatchObject({ visitId: ctx.visitId, photoId: photo1.id, fraction: 0.5, targetSegmentIds: [halfWall.id] });
+  });
+
+  it("polygon panel gives the same result as the column panel", async () => {
+    const { ctx, photo1, halfWall } = await panelSetup();
+    const out = await run(
+      "measure",
+      { photo_id: photo1.id, mode: "panel", target_segment_ids: [halfWall.id], panel: { polygon: [[60, 50], [260, 50], [260, 250], [60, 250]] } },
+      ctx,
+    );
+    expect(out.output).toMatchObject({ panel_area_px: 40000, covered_area_px: 20000, fraction: 0.5 });
+  });
+
+  it("requires the panel columns to be verified column segments", async () => {
+    const { ctx, photo1, left, halfWall } = await panelSetup();
+    const unverified = await insertSegment(photo1.id, "column", null, [260, 0, 20, 334]);
+    const out = await run(
+      "measure",
+      { photo_id: photo1.id, mode: "panel", target_segment_ids: [halfWall.id], panel: { left_column_id: left.id, right_column_id: unverified.id, top_y: 50, bottom_y: 250 } },
+      ctx,
+    );
+    expect(errorOf(out)).toMatch(/Panel columns must be verified segments/);
+
+    const notColumn = await run(
+      "measure",
+      { photo_id: photo1.id, mode: "panel", target_segment_ids: [halfWall.id], panel: { left_column_id: left.id, right_column_id: halfWall.id, top_y: 50, bottom_y: 250 } },
+      ctx,
+    );
+    expect(errorOf(notColumn)).toMatch(new RegExp(`Segments ${halfWall.id} \\(brickwork\\) are not columns`));
+  });
+
+  it("validates mode-specific arguments", async () => {
+    const { ctx, photo1, halfWall } = await panelSetup();
+    const out = await run("measure", { photo_id: photo1.id, mode: "panel", target_segment_ids: [halfWall.id] }, ctx);
+    expect(errorOf(out)).toBe("Invalid arguments");
+    expect(JSON.stringify(out.output)).toMatch(/panel is required in panel mode/);
+  });
+
+  it("record_assessment computes qty_done = fraction × panel_planned_qty and ignores the model's number", async () => {
+    const { ctx, photo1, halfWall, panel } = await panelSetup();
+    const item = await brickItem(ctx.projectId, 12);
+    const m = await run("measure", { photo_id: photo1.id, mode: "panel", target_segment_ids: [halfWall.id], panel }, ctx);
+    const measurementId = (m.output as { measurement_id: number }).measurement_id;
+
+    const out = await run(
+      "record_assessment",
+      {
+        boq_item_id: item.id,
+        percent_complete: 2,
+        qty_done: 99, // wrong on purpose: must be ignored
+        panel_measurement_id: measurementId,
+        confidence: 0.8,
+        rationale: "Lower half of the bay is laid.",
+        evidence: [{ photo_id: photo1.id, segment_ids: [] }],
+      },
+      ctx,
+    );
+
+    expect(errorOf(out)).toBeUndefined();
+    expect(out.output).toMatchObject({ qty_done: 6, qty_basis: "0.5 × 12 m2 (panel_planned_qty) = 6 m2" });
+    expect(JSON.stringify(out.output)).toMatch(/qty_done 99 was ignored/);
+    const [a] = await db.select().from(schema.assessments).where(eq(schema.assessments.boqItemId, item.id));
+    expect(a!.qtyDone).toBe(6);
+    const ev = await db.select().from(schema.assessmentEvidence).where(eq(schema.assessmentEvidence.assessmentId, a!.id));
+    expect(ev).toEqual([expect.objectContaining({ photoId: photo1.id, segmentIds: [halfWall.id] })]); // measurement's targets added
+  });
+
+  it("falls back to planned_qty when the item has no panel_planned_qty, and says so", async () => {
+    const { ctx, photo1, halfWall, panel } = await panelSetup();
+    const item = await brickItem(ctx.projectId, null);
+    const m = await run("measure", { photo_id: photo1.id, mode: "panel", target_segment_ids: [halfWall.id], panel }, ctx);
+    const out = await run(
+      "record_assessment",
+      {
+        boq_item_id: item.id,
+        percent_complete: 50,
+        panel_measurement_id: (m.output as { measurement_id: number }).measurement_id,
+        confidence: 0.7,
+        rationale: "x",
+        evidence: [{ photo_id: photo1.id, segment_ids: [halfWall.id] }],
+      },
+      ctx,
+    );
+    expect(out.output).toMatchObject({ qty_done: 190 });
+    expect(JSON.stringify(out.output)).toMatch(/no panel_planned_qty, so the panel was taken as the whole item/);
+  });
+
+  it("refuses a panel measurement from another visit", async () => {
+    const a = await panelSetup();
+    const m = await run("measure", { photo_id: a.photo1.id, mode: "panel", target_segment_ids: [a.halfWall.id], panel: a.panel }, a.ctx);
+    const b = await seed();
+    const item = await brickItem(b.ctx.projectId, 12);
+    const out = await run(
+      "record_assessment",
+      {
+        boq_item_id: item.id,
+        percent_complete: 50,
+        panel_measurement_id: (m.output as { measurement_id: number }).measurement_id,
+        confidence: 0.7,
+        rationale: "x",
+        evidence: [{ photo_id: b.photo1.id, segment_ids: [] }],
+      },
+      b.ctx,
+    );
+    expect(errorOf(out)).toMatch(/is not a measurement from this visit/);
+  });
+
+  it("view_photo(draw_panel) overlays the panel and reports its size", async () => {
+    const { ctx, photo1, panel } = await panelSetup();
+    const out = await run("view_photo", { photo_id: photo1.id, draw_panel: panel }, ctx);
+    expect(errorOf(out)).toBeUndefined();
+    expect(out.output).toMatchObject({ panel: { panel_area_px: 40000, clipped: false, warnings: [] } });
+    expect(out.images).toHaveLength(1);
+  });
+});
+
 describe("BOQ rules", () => {
   const item = (measureMode: "count" | "area" | "visual_only", segmentTargets: ("column" | "brickwork")[]) => ({
     zoneId: null,
@@ -301,6 +450,7 @@ describe("BOQ rules", () => {
     plannedQty: 1,
     measureMode,
     segmentTargets,
+    panelPlannedQty: null,
     sequenceNo: null,
   });
 
@@ -316,5 +466,11 @@ describe("BOQ rules", () => {
     expect(normalizeBoqItem(item("area", [])).item).toMatchObject({ measureMode: "visual_only", segmentTargets: [] });
     expect(normalizeBoqItem(item("count", ["column", "brickwork"])).item.segmentTargets).toEqual(["column"]);
     expect(normalizeBoqItem(item("visual_only", ["column"])).item).toMatchObject({ measureMode: "visual_only", segmentTargets: [] });
+  });
+
+  it("only allows panel_planned_qty on area items", () => {
+    expect(boqItemProblem({ ...item("area", ["brickwork"]), panelPlannedQty: 12.5 })).toBeNull();
+    expect(boqItemProblem({ ...item("count", ["column"]), panelPlannedQty: 3 })).toMatch(/only applies to area items/);
+    expect(normalizeBoqItem({ ...item("count", ["column"]), panelPlannedQty: 3 }).item.panelPlannedQty).toBeNull();
   });
 });

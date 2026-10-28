@@ -59,6 +59,11 @@ function bboxesOverlap([ax, ay, aw, ah]: BBox, [bx, by, bw, bh]: BBox): boolean 
   return ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
 }
 
+/** Decode a stored single-channel mask PNG to row-major pixels (0 / 255). */
+export function decodeMask(png: Buffer): Promise<Uint8Array> {
+  return rawPixels(png, new Map());
+}
+
 async function rawPixels(png: Buffer, cache: Map<Buffer, Uint8Array>): Promise<Uint8Array> {
   let px = cache.get(png);
   if (!px) {

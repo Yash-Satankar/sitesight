@@ -42,6 +42,8 @@ export const boqItems = pgTable("boq_items", {
   plannedQty: numeric("planned_qty", { mode: "number" }).notNull(),
   measureMode: text("measure_mode", { enum: ["count", "area", "visual_only"] }).notNull(),
   segmentTargets: text("segment_targets", { enum: ["column", "brickwork"] }).array().notNull().default([]),
+  // Area items: planned qty inside one photographed panel; qty_done = panel fraction × this (else × planned_qty).
+  panelPlannedQty: numeric("panel_planned_qty", { mode: "number" }),
   sequenceNo: integer("sequence_no"),
 });
 
@@ -134,6 +136,29 @@ export const segmentQueries = pgTable(
   },
   (t) => [primaryKey({ columns: [t.photoId, t.concept] })],
 );
+
+/**
+ * Result of measure(mode='panel'). record_assessment reads `fraction` from here by id, so the
+ * quantity is computed by code from a stored measurement, never typed in by the model.
+ */
+export const panelMeasurements = pgTable("panel_measurements", {
+  id: serial("id").primaryKey(),
+  visitId: integer("visit_id")
+    .notNull()
+    .references(() => visits.id, { onDelete: "cascade" }),
+  photoId: integer("photo_id")
+    .notNull()
+    .references(() => photos.id, { onDelete: "cascade" }),
+  runId: integer("run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+  targetSegmentIds: integer("target_segment_ids").array().notNull(),
+  panel: jsonb("panel").notNull(), // the PanelSpecArg as given
+  panelAreaPx: integer("panel_area_px").notNull(),
+  coveredAreaPx: integer("covered_area_px").notNull(),
+  fraction: real("fraction").notNull(),
+  clipped: boolean("clipped").notNull(),
+  warnings: jsonb("warnings").$type<string[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const assessments = pgTable(
   "assessments",

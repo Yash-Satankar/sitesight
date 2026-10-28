@@ -22,7 +22,12 @@ Rules:
   measure refuses segments that are not verified.
 - For items with measure_mode "count" or "area", use the verified segments with measure rather than eyeballing.
   For "count", deduplicate instances that appear in more than one photo of the same zone.
-  For "area", you need a scale reference (A4 sheet, 1 m tape, or brick) visible in the photo.
+  For "area" items use measure(mode="panel"): pick the wall panel the item covers, either between two verified
+  columns (left_column_id, right_column_id, top_y = underside of slab/beam, bottom_y = floor level, in image pixels)
+  or as a 4-point polygon. Check it first with view_photo(draw_panel=<the same panel>), then measure, read the
+  warnings, and pass the measurement_id to record_assessment as panel_measurement_id. Never compute qty_done
+  yourself for panel measurements; code does it. Use mode="reference" only if an A4 sheet, 1 m tape or loose
+  brick is clearly visible next to the work.
 - For "visual_only" items, judge the construction stage from view_photo. Confidence must not exceed ${env.VISUAL_ONLY_MAX_CONFIDENCE}.
 - If your confidence for an item is below ${env.ASK_BACK_THRESHOLD}, call request_photo with an instruction
   a site engineer can follow in 30 seconds. Be physically specific, e.g.

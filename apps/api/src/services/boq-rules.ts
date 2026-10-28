@@ -15,6 +15,7 @@ export function boqItemProblem(item: BoqItemInput): string | null {
     return `${item.measureMode} items need a segment target; use visual_only if it cannot be segmented`;
   }
   if (mismatched.length) return `segment target ${mismatched.join(", ")} cannot be measured as ${item.measureMode}`;
+  if (item.panelPlannedQty != null && item.measureMode !== "area") return "panel_planned_qty only applies to area items";
   return null;
 }
 
@@ -23,9 +24,10 @@ export function normalizeBoqItem(item: BoqItemInput): { item: BoqItemInput; warn
   const problem = boqItemProblem(item);
   if (!problem) return { item, warning: null };
   const matching = item.segmentTargets.filter((t) => SEGMENT_TARGETS[t].measureMode === item.measureMode);
-  const fixed: BoqItemInput =
+  let fixed: BoqItemInput =
     item.measureMode !== "visual_only" && matching.length
       ? { ...item, segmentTargets: matching }
       : { ...item, measureMode: "visual_only", segmentTargets: [] };
+  if (fixed.measureMode !== "area") fixed = { ...fixed, panelPlannedQty: null };
   return { item: fixed, warning: `${item.code}: ${problem}. Set to ${fixed.measureMode}.` };
 }
