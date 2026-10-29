@@ -5,6 +5,9 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     // Generous: many files start PGlite (WASM Postgres) or spawn tsx children in parallel, which is slow under load.
     testTimeout: 60_000,
+    // Several files start their own PGlite (WASM Postgres); unbounded parallelism occasionally crashed a worker
+    // ("Channel closed") under memory pressure.
+    maxWorkers: 4,
     hookTimeout: 60_000,
     // Set before src/config.ts loads. Numbers are chosen so test costs are easy to reason about:
     // one Spark call = 200 in + 200 out tokens at $10/Mtok = $0.004; one SAM request = $0.0035; cap = $0.01.

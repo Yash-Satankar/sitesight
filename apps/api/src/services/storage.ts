@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../config.js";
 
@@ -104,4 +104,14 @@ export async function putObject(key: string, body: Buffer, contentType: string):
     return;
   }
   await s3().send(new PutObjectCommand({ Bucket: env.R2_BUCKET, Key: key, Body: body, ContentType: contentType }));
+}
+
+/** Delete an object; a missing object is not an error. */
+export async function deleteObject(key: string): Promise<void> {
+  const local = localPath(key);
+  if (local) {
+    await rm(local, { force: true });
+    return;
+  }
+  await s3().send(new DeleteObjectCommand({ Bucket: env.R2_BUCKET, Key: key }));
 }

@@ -11,7 +11,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, statSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -29,6 +29,7 @@ const { values: args } = parseArgs({
     name: { type: "string" },
     port: { type: "string", default: "8799" },
     "timeout-min": { type: "string", default: "15" },
+    keep: { type: "boolean", default: false },
   },
   strict: true,
 });
@@ -188,6 +189,7 @@ async function main() {
     }
     const items = boq.items.map(({ zone, ...it }) => ({ ...it, zoneId: zone ? zones.get(zone)! : null }));
     const saved = await http<unknown[]>("PUT", `/projects/${p.id}/boq`, { items });
+    createdProjectId = p.id;
     console.log(`   project #${p.id} "${p.name}", zones ${zoneNames.join(", ")}, ${saved.length} BOQ items`);
     return { ...p, zones };
   });
@@ -258,7 +260,19 @@ async function main() {
   }
   console.log(`PDF: ${pdfPath}`);
   console.log(`Logs: ${join(outDir, "api.log")}, ${join(outDir, "worker.log")}`);
+
+  if (args.keep) {
+    console.log(`Kept project #${project.id} and its files (--keep). Remove later with: pnpm db:purge-e2e`);
+  } else {
+    // The run's files live in its own storage folder, so remove that folder whole; the PDF and logs above stay.
+    const { deleteProject } = await import("../src/services/projects-admin.js");
+    const deleted = await deleteProject(project.id);
+    await rm(storageDir, { recursive: true, force: true });
+    console.log(`Cleaned up: deleted project #${project.id} (${deleted?.visits ?? 0} visits) and its stored files. Use --keep to keep them.`);
+  }
 }
+
+let createdProjectId: number | null = null;
 
 main()
   .then(async () => {
@@ -271,6 +285,7 @@ main()
       if (lines.length) console.error(`\n--- last ${label} log lines ---\n${lines.slice(-15).join("\n")}`);
     }
     console.error(`\nLogs: ${outDir}`);
+    if (createdProjectId != null) console.error(`Kept project #${createdProjectId} for inspection. Remove with: pnpm db:purge-e2e`);
     await stopAll();
     process.exit(1);
   });
