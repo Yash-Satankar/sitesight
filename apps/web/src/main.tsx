@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import "./index.css";
-import { Layout } from "./components/Layout";
+import { Layout, RouteError } from "./components/Layout";
 import { ProjectsPage } from "./pages/Projects";
 import { ProjectPage } from "./pages/Project";
 import { BoqReviewPage } from "./pages/BoqReview";
@@ -14,6 +14,7 @@ import { ReportPage } from "./pages/Report";
 const router = createBrowserRouter([
   {
     element: <Layout />,
+    errorElement: <RouteError />,
     children: [
       { path: "/", element: <ProjectsPage /> },
       { path: "/projects/:projectId", element: <ProjectPage /> },

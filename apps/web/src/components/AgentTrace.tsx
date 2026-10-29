@@ -12,7 +12,11 @@ const KIND_STYLE: Record<AgentStep["kind"], string> = {
 
 export function AgentTrace({ steps }: { steps: AgentStep[] }) {
   const endRef = useRef<HTMLDivElement>(null);
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }), [steps.length]);
+  // Braces matter: an effect may only return a cleanup function. Newer mobile browsers return a Promise from
+  // smooth scrollIntoView, which React would later try to call ("destroy is not a function").
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [steps.length]);
 
   if (!steps.length) return <p className="text-sm text-gray-500">Waiting for the agent…</p>;
   return (
