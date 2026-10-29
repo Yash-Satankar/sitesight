@@ -40,22 +40,19 @@ export async function itemAssessmentsByProject(projectIds: number[]): Promise<Ma
 }
 
 /**
- * Planned-qty-weighted average of each item's latest confirmed percent (unconfirmed items count as 0).
- * Null when no item has a planned quantity. Inferred items count, and are reported separately.
+ * Mean of each item's latest confirmed percent, every item counting equally (unconfirmed items count as 0).
+ * Null when the project has no BOQ items. Inferred items count, and are reported separately.
  */
 export function overallPercent(
-  items: { id: number; plannedQty: number }[],
+  items: { id: number }[],
   assessments: Map<number, ItemAssessments> | undefined,
 ): { overallPercent: number | null; inferredItems: number } {
-  let weight = 0;
   let sum = 0;
   let inferredItems = 0;
   for (const it of items) {
     const confirmed = assessments?.get(it.id)?.confirmed;
     if (confirmed?.basis === "inferred") inferredItems++;
-    if (!(it.plannedQty > 0)) continue;
-    weight += it.plannedQty;
-    sum += it.plannedQty * (confirmed?.percentComplete ?? 0);
+    sum += confirmed?.percentComplete ?? 0;
   }
-  return { overallPercent: weight > 0 ? Math.round((sum / weight) * 10) / 10 : null, inferredItems };
+  return { overallPercent: items.length ? Math.round((sum / items.length) * 10) / 10 : null, inferredItems };
 }

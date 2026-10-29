@@ -1,15 +1,15 @@
 /**
  * Dry run of the drawing import, without the database:
- *   pnpm boq-from-drawings --pdf drawings.pdf [--out samples/out/drawings] [--max-cost 0.50]
+ *   pnpm boq-from-drawings --pdf drawings.pdf [--out samples/out/drawings] [--max-cost 0.50] [--notes]
  * Rasterises the PDF, classifies every page and extracts the structural sheets with Muse Spark (real calls, capped by
  * MAX_COST_PER_DRAWING_IMPORT_USD or --max-cost), assembles the proposed BOQ in code and prints it with the cost.
- * --out also writes the page PNGs and proposal.json.
+ * Action items are always printed; notes only as a count unless --notes. --out also writes page PNGs and proposal.json.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { env } from "../src/config.js";
-import { assembleProposal } from "../src/services/drawings/assemble.js";
+import { assembleProposal, runActions } from "../src/services/drawings/assemble.js";
 import { ImportCostMeter } from "../src/services/drawings/cost.js";
 import { isStructural, runPipeline, type PageState } from "../src/services/drawings/pipeline.js";
 import { rasterizePdf } from "../src/services/drawings/rasterize.js";
@@ -17,7 +17,7 @@ import { formatProposal } from "./drawings-lib.js";
 
 const { values: args } = parseArgs({
   args: process.argv.slice(2).filter((a) => a !== "--"),
-  options: { pdf: { type: "string" }, out: { type: "string" }, "max-cost": { type: "string" } },
+  options: { pdf: { type: "string" }, out: { type: "string" }, "max-cost": { type: "string" }, notes: { type: "boolean", default: false } },
 });
 const cwd = process.env.INIT_CWD ?? process.cwd();
 
@@ -56,10 +56,8 @@ async function main() {
   );
 
   const proposal = assembleProposal(states);
-  const failed = states.filter((s) => s.error);
-  if (failed.length) proposal.warnings.unshift(`${failed.length} page(s) could not be read: ${failed.map((f) => `p.${f.pageNo} (${f.error})`).join("; ")}`);
-  if (stoppedByCost) proposal.warnings.unshift(`Stopped at the cost cap ($${limit.toFixed(2)}); some pages were not read.`);
-  console.log(`\n${formatProposal(proposal)}`);
+  proposal.warnings.unshift(...runActions(states, stoppedByCost, limit, isStructural));
+  console.log(`\n${formatProposal(proposal, { notes: args.notes })}`);
   console.log(
     `\nCost: $${meter.spentUsd.toFixed(4)} (${meter.calls} Spark call(s), ${meter.inputTokens} in / ${meter.outputTokens} out tokens) · ${((Date.now() - started) / 1000).toFixed(0)} s`,
   );

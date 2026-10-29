@@ -22,7 +22,7 @@ projectsRouter.get("/projects", async (_req, res) => {
   if (!ids.length) return void res.json([]);
   const [items, lastVisits, openAsks, assessments] = await Promise.all([
     db
-      .select({ projectId: schema.boqItems.projectId, id: schema.boqItems.id, plannedQty: schema.boqItems.plannedQty })
+      .select({ projectId: schema.boqItems.projectId, id: schema.boqItems.id })
       .from(schema.boqItems)
       .where(inArray(schema.boqItems.projectId, ids)),
     db

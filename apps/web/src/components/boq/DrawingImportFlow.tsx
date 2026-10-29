@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FileText, Loader2, Maximize2, Minimize2, Save, Trash2, TriangleAlert, X } from "lucide-react";
+import { ChevronDown, FileText, Info, Loader2, Maximize2, Minimize2, Save, Trash2, TriangleAlert, X } from "lucide-react";
 import type { BoqItemInput, DrawingImport, DrawingPage, DrawingSource, ProposedBoqItem, SheetType } from "@sitesight/shared";
 import { api, apiUrl } from "../../lib/api";
 import { ErrorNote } from "../Layout";
@@ -132,6 +132,8 @@ export function DrawingImportFlow({
   }
 
   const pageByNo = new Map((imp?.pages ?? []).map((p) => [p.pageNo, p]));
+  const actions = imp?.proposal?.warnings.filter((w) => w.kind === "action") ?? [];
+  const notes = imp?.proposal?.warnings.filter((w) => w.kind === "note") ?? [];
   const done = imp?.pages.filter((p) => p.status === "extracted" || p.status === "skipped" || p.status === "failed").length ?? 0;
 
   if (importId == null || !imp) {
@@ -183,38 +185,36 @@ export function DrawingImportFlow({
         </ul>
       </section>
 
-      {imp.proposal && imp.proposal.discrepancies.length > 0 && (
-        <section className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4">
-          <h2 className="flex items-center gap-2 text-base font-bold text-amber-950">
-            <TriangleAlert className="h-5 w-5 text-amber-700" aria-hidden /> Drawing discrepancies
+      {actions.length > 0 && (
+        <section className="rounded-2xl border-2 border-amber-400 bg-amber-50 p-4" aria-labelledby="actions-title">
+          <h2 id="actions-title" className="flex items-center gap-2 text-base font-bold text-amber-950">
+            <TriangleAlert className="h-5 w-5 text-amber-700" aria-hidden /> Action needed
+            <span className="num ml-auto rounded-full bg-amber-200 px-2 py-0.5 text-sm">{actions.length}</span>
           </h2>
-          <p className="mt-1 text-sm text-amber-950">The sheets disagree. Check the drawings and enter the right quantity below.</p>
-          <ul className="mt-2 space-y-1.5">
-            {imp.proposal.discrepancies.map((d, i) => (
-              <li key={i} className="text-sm text-amber-950">
-                <span className="font-semibold">{d.message}</span>{" "}
-                {[d.schedulePage, d.layoutPage].map((n) => {
-                  const pg = pageByNo.get(n);
-                  return pg ? (
-                    <button key={n} type="button" className="mr-2 underline" onClick={() => setViewer({ page: pg, evidence: [] })}>
-                      open p.{n}
-                    </button>
-                  ) : null;
-                })}
+          <ul className="mt-2 space-y-2">
+            {actions.map((w, i) => (
+              <li key={i} className="text-sm leading-snug text-amber-950">
+                <span className="font-semibold">{w.text}</span> <PageLinks pages={w.pages} pageByNo={pageByNo} open={(pg) => setViewer({ page: pg, evidence: [] })} />
               </li>
             ))}
           </ul>
         </section>
       )}
 
-      {imp.proposal && imp.proposal.warnings.length > 0 && (
-        <details className="card">
-          <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-            {imp.proposal.warnings.length} note{imp.proposal.warnings.length === 1 ? "" : "s"} from reading the drawings
+      {notes.length > 0 && (
+        <details className="card group">
+          <summary className="flex min-h-8 cursor-pointer list-none items-center gap-2 text-sm font-semibold text-slate-700">
+            <Info className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+            <span className="min-w-0">
+              {notes.length} note{notes.length === 1 ? "" : "s"} from the sheets <span className="font-normal text-slate-500">· general notes, title blocks</span>
+            </span>
+            <ChevronDown className="ml-auto h-4 w-4 transition-transform group-open:rotate-180" aria-hidden />
           </summary>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
-            {imp.proposal.warnings.map((w, i) => (
-              <li key={i}>{w}</li>
+          <ul className="mt-2 space-y-1.5 text-sm text-slate-700">
+            {notes.map((w, i) => (
+              <li key={i}>
+                {w.text} <PageLinks pages={w.pages} pageByNo={pageByNo} open={(pg) => setViewer({ page: pg, evidence: [] })} />
+              </li>
             ))}
           </ul>
         </details>
@@ -307,6 +307,23 @@ export function DrawingImportFlow({
 
       {viewer && <PageViewer page={viewer.page} evidence={viewer.evidence} onClose={() => setViewer(null)} />}
     </div>
+  );
+}
+
+/** Small "p.9" buttons that open the page; at most 6 so a long list stays readable. */
+function PageLinks({ pages, pageByNo, open }: { pages: number[]; pageByNo: Map<number, DrawingPage>; open: (p: DrawingPage) => void }) {
+  if (!pages.length) return null;
+  return (
+    <span className="inline-flex flex-wrap gap-x-2">
+      {pages.slice(0, 6).map((n) => {
+        const pg = pageByNo.get(n);
+        return pg ? (
+          <button key={n} type="button" className="min-h-6 underline underline-offset-2" onClick={() => open(pg)}>
+            open p.{n}
+          </button>
+        ) : null;
+      })}
+    </span>
   );
 }
 

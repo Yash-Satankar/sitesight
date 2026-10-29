@@ -22,8 +22,8 @@ export type Project = z.infer<typeof Project>;
 /** GET /projects rows: a project plus the numbers its card shows. */
 export const ProjectListItem = Project.extend({
   /**
-   * Planned-qty-weighted average of each BOQ item's latest confirmed (accepted/edited) percent; items without one
-   * count as 0. Null when the project has no BOQ items with a planned quantity.
+   * Mean of the BOQ items' latest confirmed (accepted/edited) percents, each item counting equally; items without one
+   * count as 0. Null when the project has no BOQ items.
    */
   overallPercent: z.number().nullable(),
   /** Confirmed items counted in overallPercent whose latest assessment is inferred (not billable). */

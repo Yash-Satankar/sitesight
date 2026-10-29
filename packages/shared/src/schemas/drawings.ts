@@ -34,6 +34,8 @@ export const PageClassification = z.object({
   title: z.string().max(200),
   notes: z.string().max(500).default(""),
   shows_masonry_walls: z.boolean().default(false),
+  /** The title printed in the title block, when it differs from the drawing's own heading (often a stale template). */
+  title_block_title: z.string().max(200).nullable().default(null),
 });
 export type PageClassification = z.infer<typeof PageClassification>;
 
@@ -73,6 +75,7 @@ export const SheetExtraction = z.object({
         mark: z.string().min(1).max(20),
         size_text: z.string().max(40),
         kind: z.enum(["plinth", "floor", "roof", "lintel", "other"]),
+        floor,
         ...evidence,
       }),
     )
@@ -85,6 +88,9 @@ export const SheetExtraction = z.object({
         floor,
         thickness_mm: z.number().positive().nullable(),
         area_m2: z.number().positive().nullable(),
+        /** Exactly as printed, with the drawing's own units (e.g. 5", 125 MM). Descriptions use these, never conversions. */
+        thickness_text: z.string().max(40).nullable().default(null),
+        area_text: z.string().max(60).nullable().default(null),
         ...evidence,
       }),
     )
@@ -128,10 +134,22 @@ export const ProposedBoqItem = BoqItemInput.extend({
 });
 export type ProposedBoqItem = z.infer<typeof ProposedBoqItem>;
 
+/**
+ * action: the engineer must do something (missing quantity, discrepancy, unreadable page, cost cap).
+ * note: for information (general notes on the sheets, specs, title-block mismatches). Repeats are merged, with pages.
+ */
+export const ProposalWarning = z.object({
+  kind: z.enum(["action", "note"]),
+  text: z.string(),
+  pages: z.array(z.number().int()).default([]),
+});
+export type ProposalWarning = z.infer<typeof ProposalWarning>;
+
 export const BoqProposal = z.object({
   items: z.array(ProposedBoqItem),
   discrepancies: z.array(DrawingDiscrepancy),
-  warnings: z.array(z.string()),
+  // Proposals stored before warnings had a kind were plain strings: read them as notes.
+  warnings: z.array(z.preprocess((w) => (typeof w === "string" ? { kind: "note", text: w, pages: [] } : w), ProposalWarning)),
 });
 export type BoqProposal = z.infer<typeof BoqProposal>;
 

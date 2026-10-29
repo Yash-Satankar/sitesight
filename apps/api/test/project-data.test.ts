@@ -77,8 +77,9 @@ describe("GET /projects", () => {
   it("adds overall percent, inferred count, last visit date and open photo requests", async () => {
     const { body } = await call("GET", "/projects");
     const main = body.find((p: { id: number }) => p.id === ids.project);
-    // (10×100 + 30×25 + 60×100) / 100: SLB's newer 60% is only proposed, so its confirmed 25% counts.
-    expect(main).toMatchObject({ name: "Main", overallPercent: 77.5, inferredItems: 1, lastVisitDate: "2026-10-28", openAskBacks: 2 });
+    // Each item counts equally: (100 + 25 + 100) / 3. Planned quantities (10, 30, 60) don't weight it; SLB's newer
+    // 60% is only proposed, so its confirmed 25% counts.
+    expect(main).toMatchObject({ name: "Main", overallPercent: 75, inferredItems: 1, lastVisitDate: "2026-10-28", openAskBacks: 2 });
     expect(body.find((p: { id: number }) => p.id === ids.empty)).toMatchObject({ overallPercent: null, inferredItems: 0, lastVisitDate: null, openAskBacks: 0 });
   });
 });

@@ -6,7 +6,7 @@ import { env } from "../../config.js";
 import { db, schema } from "../../db/client.js";
 import { enqueue } from "../jobs.js";
 import { getObject, newKey, presignGet, putObject } from "../storage.js";
-import { assembleProposal } from "./assemble.js";
+import { assembleProposal, runActions } from "./assemble.js";
 import { ImportCostMeter } from "./cost.js";
 import { rasterizePdf } from "./rasterize.js";
 import { isStructural, runPipeline, type PageState } from "./pipeline.js";
@@ -73,14 +73,7 @@ export async function runDrawingImport(importId: number): Promise<DrawingImport[
   );
 
   const proposal = assembleProposal(states.map((s) => ({ pageNo: s.pageNo, classification: s.classification, extraction: s.extraction })));
-  const failed = states.filter((s) => s.error);
-  if (failed.length) proposal.warnings.unshift(`${failed.length} page(s) could not be read: ${failed.map((f) => `p.${f.pageNo} (${f.error})`).join("; ")}`);
-  if (stoppedByCost) {
-    const todo = states.filter((s) => !s.classification || (!s.extraction && isStructural(s.classification?.sheet_type))).map((s) => s.pageNo);
-    proposal.warnings.unshift(
-      `Stopped at the cost cap ($${env.MAX_COST_PER_DRAWING_IMPORT_USD.toFixed(2)}); page(s) ${todo.join(", ") || "—"} were not read. The proposal covers the rest.`,
-    );
-  }
+  proposal.warnings.unshift(...runActions(states, stoppedByCost, env.MAX_COST_PER_DRAWING_IMPORT_USD, isStructural));
   const status = stoppedByCost ? "cost_limit" : "done";
   await db.update(schema.drawingImports).set({ status, proposal }).where(eq(schema.drawingImports.id, importId));
   return status;

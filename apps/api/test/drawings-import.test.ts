@@ -133,9 +133,9 @@ describe("respondJsonContent", () => {
 
 // ---- scripted Spark for whole drawing sets: classification by page size, extraction by "Page N" ----
 const CLASSES: Record<string, PageClassification> = {
-  "2000x1414": { sheet_type: "column_layout", title: "Column layout plan", notes: "", shows_masonry_walls: false },
-  "1414x2000": { sheet_type: "footing_column_schedule", title: "Column schedule", notes: "", shows_masonry_walls: false },
-  "1545x2000": { sheet_type: "electrical", title: "Electrical layout", notes: "", shows_masonry_walls: false },
+  "2000x1414": { sheet_type: "column_layout", title: "Column layout plan", notes: "", shows_masonry_walls: false, title_block_title: null },
+  "1414x2000": { sheet_type: "footing_column_schedule", title: "Column schedule", notes: "", shows_masonry_walls: false, title_block_title: null },
+  "1545x2000": { sheet_type: "electrical", title: "Electrical layout", notes: "", shows_masonry_walls: false, title_block_title: null },
 };
 const EXTRACTIONS: Record<number, object> = {
   1: { layout_counts: [{ element: "column", mark: "C1", count: 2, floor: null, evidence_text: "counted 2 C1", confidence: 0.8 }, { element: "column", mark: "C2", count: 9, floor: null, evidence_text: "counted 9 C2", confidence: 0.7 }] },
@@ -275,7 +275,7 @@ describe("POST /projects/:id/drawings + import job", () => {
     await db.update(schema.drawingImports).set({ costUsd: 5 }).where(eq(schema.drawingImports.id, body.id)); // already over $1
     expect(await runDrawingImport(body.id)).toBe("cost_limit");
     const imp = await (await fetch(`${base}/projects/${projectId}/drawings/${body.id}`)).json();
-    expect(imp.proposal.warnings[0]).toMatch(/^Stopped at the cost cap \(\$1\.00\); page\(s\) 1, 2, 3 were not read/);
+    expect(imp.proposal.warnings[0]).toEqual({ kind: "action", text: "Stopped at the cost cap ($1.00): pp. 1, 2, 3 not read. The proposal covers the rest.", pages: [1, 2, 3] });
     expect(fake.calls).toHaveLength(0);
   });
 

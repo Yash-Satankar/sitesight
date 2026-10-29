@@ -348,7 +348,7 @@ async function seedDrawings(projectId: number) {
   const { db, schema } = await import("../../api/src/db/client.js");
   const { assembleProposal } = await import("../../api/src/services/drawings/assemble.js");
   const { and, eq } = (await import("../../api/node_modules/drizzle-orm/index.js")) as typeof import("drizzle-orm");
-  const cls = (sheet_type: string, title: string, shows_masonry_walls = false) => ({ sheet_type, title, notes: "", shows_masonry_walls });
+  const cls = (sheet_type: string, title: string, shows_masonry_walls = false) => ({ sheet_type, title, notes: "", shows_masonry_walls, title_block_title: "ARCHITECTURAL FLOOR PLAN" });
   const classes = [
     cls("column_layout", "Column layout plan"),
     cls("footing_column_schedule", "Footing & column schedule"),
@@ -356,7 +356,7 @@ async function seedDrawings(projectId: number) {
     cls("electrical", "Electrical layout"),
     cls("slab_plan", "Roof slab plan"),
   ];
-  const empty = { columns: [], footings: [], beams: [], slabs: [], layout_counts: [], notes: [] };
+  const empty = { columns: [], footings: [], beams: [], slabs: [], layout_counts: [], notes: ["1. ALL DIMENSIONS ARE IN FEET UNLESS NOTED OTHERWISE."] };
   const extractions: Record<number, object> = {
     1: {
       ...empty,
@@ -378,8 +378,8 @@ async function seedDrawings(projectId: number) {
     },
     5: {
       ...empty,
-      notes: ["No slab area is printed; only the thickness."],
-      slabs: [{ mark: "S1", floor: "roof", thickness_mm: 125, area_m2: null, evidence_text: 'S1 - SLAB THK 125 MM (5")', confidence: 0.88 }],
+      notes: ["ALL DIMENSIONS ARE IN FEET UNLESS NOTED OTHERWISE", "Main bars 10 dia @ 150 c/c."],
+      slabs: [{ mark: "S1", floor: "G.F", thickness_text: '125 MM (5")', thickness_mm: 125, area_m2: null, evidence_text: 'S1 - SLAB THK 125 MM (5")', confidence: 0.88 }],
     },
   };
   const structural = new Set(["column_layout", "footing_column_schedule", "slab_plan"]);
