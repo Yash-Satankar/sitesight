@@ -94,6 +94,7 @@ projectsRouter.get("/projects/:id", async (req, res) => {
       panelPlannedQty: b.panelPlannedQty,
       stages: b.stages,
       sequenceNo: b.sequenceNo,
+      drawingSource: b.drawingSource,
     })),
     visits: visits.map(toVisitSummary),
     progress,

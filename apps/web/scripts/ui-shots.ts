@@ -277,7 +277,136 @@ async function seed() {
   const v4 = (await http<{ id: number }>("POST", `/projects/${project.id}/visits`, { visitDate: "2026-10-30" })).id;
   await addPhoto(v4, images[1]!);
 
-  return { projectId: project.id, emptyProjectId: empty.id, zoneId: gf.id, v2, v3, v4, askBackId: askPb!.id };
+  const drawings = await seedDrawings(empty.id);
+  return { projectId: project.id, emptyProjectId: empty.id, zoneId: gf.id, v2, v3, v4, askBackId: askPb!.id, ...drawings };
+}
+
+/** A small drawing set (pdfkit), uploaded through the real endpoint; Spark results written directly (no Meta calls). */
+async function seedDrawings(projectId: number) {
+  const PDFDocument = createRequire(join(apiDir, "package.json"))("pdfkit") as typeof import("pdfkit");
+  const doc = new PDFDocument({ autoFirstPage: false });
+  const chunks: Buffer[] = [];
+  doc.on("data", (c: Buffer) => chunks.push(c));
+  const sheet = (title: string) => {
+    doc.addPage({ size: "A3", layout: "landscape", margin: 0 }); // margin 0: text near the edge must not spill onto a new page
+    doc.lineWidth(2).rect(20, 20, 1150, 802).stroke();
+    doc.rect(870, 700, 300, 122).stroke();
+    doc.fontSize(18).text(title, 885, 720, { width: 270 });
+    doc.fontSize(10).text("DEMO RESIDENCE · NAGPUR · SCALE 1:100", 885, 780, { width: 270 });
+  };
+  const ft = (a: number, b: number, c: number) => `${a}'0" x ${b}'0" x ${c}'6"`;
+  // p.1 column layout: a grid with marks (9 × C2 and 2 × C1 drawn; the schedule says 10 × C2)
+  sheet("COLUMN LAYOUT PLAN");
+  const marks = ["C1", "C2", "C2", "C2", "C2", "C2", "C2", "C2", "C2", "C2", "C1"];
+  marks.forEach((m, i) => {
+    const x = 120 + (i % 4) * 220;
+    const y = 120 + Math.floor(i / 4) * 200;
+    doc.rect(x, y, 22, m === "C2" ? 44 : 22).fill("#000");
+    doc.fillColor("#000").fontSize(14).text(m, x + 28, y);
+  });
+  for (let i = 0; i < 4; i++) doc.lineWidth(0.5).moveTo(131 + i * 220, 80).lineTo(131 + i * 220, 620).dash(6, { space: 4 }).stroke().undash();
+  // p.2 schedule table
+  sheet("FOOTING & COLUMN SCHEDULE");
+  const rows = [
+    ["MARK", "SIZE", "NOS"],
+    ["C1", '9" x 9"', "2"],
+    ["C2", '9" x 18"', "10"],
+    ["F1", ft(5, 5, 1), "8"],
+    ["F2", ft(4, 4, 1), "4"],
+  ];
+  rows.forEach((r, i) =>
+    r.forEach((c, j) => {
+      doc.lineWidth(1).rect(100 + j * 180, 100 + i * 40, 180, 40).stroke();
+      doc.fontSize(14).text(c, 110 + j * 180, 112 + i * 40);
+    }),
+  );
+  // p.3 floor plan with walls
+  sheet("GROUND FLOOR PLAN");
+  doc.lineWidth(9).rect(120, 120, 600, 420).stroke();
+  doc.moveTo(420, 120).lineTo(420, 540).stroke();
+  doc.moveTo(120, 330).lineTo(420, 330).stroke();
+  doc.fontSize(16).text("LIVING 14'x16'", 180, 200).text("KITCHEN", 480, 250).text("BED 12'x12'", 180, 420);
+  // p.4 electrical
+  sheet("ELECTRICAL LAYOUT");
+  for (let i = 0; i < 12; i++) doc.circle(150 + (i % 6) * 100, 200 + Math.floor(i / 6) * 150, 10).stroke();
+  // p.5 slab plan
+  sheet("ROOF SLAB PLAN");
+  doc.lineWidth(2).rect(120, 120, 600, 420).stroke();
+  doc.fontSize(16).text('S1 - SLAB THK 125 MM (5")', 220, 300).text("MAIN BARS 10 DIA @ 150 C/C", 220, 330);
+  doc.end();
+  await new Promise((r) => doc.on("end", r));
+  const pdf = Buffer.concat(chunks);
+
+  const upload = async () => {
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(pdf)], { type: "application/pdf" }), "demo-residence-structural-set.pdf");
+    const res = await fetch(`${API}/projects/${projectId}/drawings`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`drawing upload → HTTP ${res.status}: ${await res.text()}`);
+    return (await res.json()) as { id: number };
+  };
+
+  const { db, schema } = await import("../../api/src/db/client.js");
+  const { assembleProposal } = await import("../../api/src/services/drawings/assemble.js");
+  const { and, eq } = (await import("../../api/node_modules/drizzle-orm/index.js")) as typeof import("drizzle-orm");
+  const cls = (sheet_type: string, title: string, shows_masonry_walls = false) => ({ sheet_type, title, notes: "", shows_masonry_walls });
+  const classes = [
+    cls("column_layout", "Column layout plan"),
+    cls("footing_column_schedule", "Footing & column schedule"),
+    cls("floor_plan", "Ground floor plan", true),
+    cls("electrical", "Electrical layout"),
+    cls("slab_plan", "Roof slab plan"),
+  ];
+  const empty = { columns: [], footings: [], beams: [], slabs: [], layout_counts: [], notes: [] };
+  const extractions: Record<number, object> = {
+    1: {
+      ...empty,
+      layout_counts: [
+        { element: "column", mark: "C1", count: 2, floor: null, evidence_text: "counted 2 'C1' labels on the plan", confidence: 0.82 },
+        { element: "column", mark: "C2", count: 9, floor: null, evidence_text: "counted 9 'C2' labels on the plan", confidence: 0.74 },
+      ],
+    },
+    2: {
+      ...empty,
+      columns: [
+        { mark: "C1", size_text: '9"x9"', count: 2, floor: null, evidence_text: 'C1 | 9" x 9" | 2', confidence: 0.93 },
+        { mark: "C2", size_text: '9"x18"', count: 10, floor: null, evidence_text: 'C2 | 9" x 18" | 10', confidence: 0.92 },
+      ],
+      footings: [
+        { mark: "F1", length_mm: 1524, breadth_mm: 1524, depth_mm: 457, size_text: ft(5, 5, 1), count: 8, evidence_text: `F1 | ${ft(5, 5, 1)} | 8`, confidence: 0.9 },
+        { mark: "F2", length_mm: 1219, breadth_mm: 1219, depth_mm: 457, size_text: ft(4, 4, 1), count: 4, evidence_text: `F2 | ${ft(4, 4, 1)} | 4`, confidence: 0.9 },
+      ],
+    },
+    5: {
+      ...empty,
+      notes: ["No slab area is printed; only the thickness."],
+      slabs: [{ mark: "S1", floor: "roof", thickness_mm: 125, area_m2: null, evidence_text: 'S1 - SLAB THK 125 MM (5")', confidence: 0.88 }],
+    },
+  };
+  const structural = new Set(["column_layout", "footing_column_schedule", "slab_plan"]);
+
+  // A finished import
+  const done = await upload();
+  for (let n = 1; n <= 5; n++) {
+    const c = classes[n - 1]!;
+    await db
+      .update(schema.drawingPages)
+      .set({ classification: c, sheetType: c.sheet_type, titleGuess: c.title, status: structural.has(c.sheet_type) ? "extracted" : "skipped", extraction: extractions[n] ?? null })
+      .where(and(eq(schema.drawingPages.importId, done.id), eq(schema.drawingPages.pageNo, n)));
+  }
+  const proposal = assembleProposal(classes.map((c, i) => ({ pageNo: i + 1, classification: c as never, extraction: (extractions[i + 1] as never) ?? null })));
+  await db.update(schema.drawingImports).set({ status: "done", costUsd: 0.3184, proposal }).where(eq(schema.drawingImports.id, done.id));
+
+  // An import in progress: page 1 read, page 2 being read, page 3 not structural, pages 4–5 waiting
+  const running = await upload();
+  for (let n = 1; n <= 3; n++) {
+    const c = classes[n - 1]!;
+    await db
+      .update(schema.drawingPages)
+      .set({ classification: c, sheetType: c.sheet_type, titleGuess: c.title, status: n === 1 ? "extracted" : n === 2 ? "classified" : "skipped", extraction: n === 1 ? extractions[1] : null })
+      .where(and(eq(schema.drawingPages.importId, running.id), eq(schema.drawingPages.pageNo, n)));
+  }
+  await db.update(schema.drawingImports).set({ status: "processing", costUsd: 0.0912 }).where(eq(schema.drawingImports.id, running.id));
+  return { doneImport: done.id, runningImport: running.id };
 }
 
 async function main() {
@@ -322,6 +451,17 @@ async function main() {
     { name: "08-visit-running", path: `/visits/${ids.v3}`, ready: "text=columns" },
     { name: "09-review", path: `/visits/${ids.v2}/review`, ready: "text=SLB-GF" },
     { name: "10-report", path: `/visits/${ids.v2}/report`, ready: "main" },
+    { name: "11-drawings-progress", path: `/projects/${ids.emptyProjectId}/boq?import=${ids.runningImport}`, ready: "text=Reading values" },
+    { name: "12-drawings-proposal", path: `/projects/${ids.emptyProjectId}/boq?import=${ids.doneImport}`, ready: "text=Proposed BOQ" },
+    {
+      name: "13-drawings-page-viewer",
+      path: `/projects/${ids.emptyProjectId}/boq?import=${ids.doneImport}`,
+      ready: "text=Proposed BOQ",
+      act: async (page) => {
+        await page.getByRole("button", { name: /Open page 2 with the evidence/ }).first().click();
+        await page.getByText("Read on this page").waitFor();
+      },
+    },
   ];
   const only = args.only?.split(",");
   const { chromium } = await import("playwright");

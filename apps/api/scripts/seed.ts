@@ -49,7 +49,7 @@ const ZONES = ["Ground Floor – Columns", "Floor 1 – East", "Floor 1 – West
 
 // Only columns (count) and brickwork (area) are segmented; everything else is assessed visually.
 // panelPlannedQty 12.5: one brick bay between two columns is about 12.5 m² (used by panel measurements).
-const BOQ: Omit<BoqItemInput, "zoneId">[] = [
+const BOQ: Omit<BoqItemInput, "zoneId" | "drawingSource">[] = [
   { code: "1.1", description: "RCC columns 300x450 up to plinth", unit: "nos", plannedQty: 24, measureMode: "count", segmentTargets: ["column"], panelPlannedQty: null, stages: null, sequenceNo: 1 },
   { code: "1.2", description: "Reinforcement steel Fe500 for columns", unit: "kg", plannedQty: 3200, measureMode: "visual_only", segmentTargets: [], panelPlannedQty: null, stages: null, sequenceNo: 1 },
   { code: "2.1", description: "RCC slab 150 mm thick, Floor 1", unit: "m3", plannedQty: 42, measureMode: "visual_only", segmentTargets: [], panelPlannedQty: null, stages: null, sequenceNo: 2 },

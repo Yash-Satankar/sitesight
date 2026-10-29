@@ -13,6 +13,7 @@ import { reportsRouter } from "./routes/reports.js";
 import { traceRouter } from "./routes/trace.js";
 import { storageRouter } from "./routes/storage.js";
 import { overlayRouter } from "./routes/overlay.js";
+import { drawingsRouter } from "./routes/drawings.js";
 import { usingLocalStorage } from "./services/storage.js";
 import { isAllowedOrigin } from "./lib/origins.js";
 
@@ -34,6 +35,7 @@ app.use(assessmentsRouter);
 app.use(reportsRouter);
 app.use(traceRouter);
 app.use(overlayRouter);
+app.use(drawingsRouter);
 if (usingLocalStorage()) app.use(storageRouter); // stands in for R2 presigned URLs
 
 app.use(errorHandler);

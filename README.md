@@ -93,6 +93,22 @@ Before each visit the previous visit's assessments are accepted (as an engineer 
 - Streams every trace step with the running cost, then prints a results table, photo requests, total steps and cost. Masks and a full JSON report go to `samples/out/dry-run-<time>/`.
 - Spend is capped by `MAX_COST_PER_VISIT_USD` in `.env`.
 
+## BOQ from drawings
+
+On the BOQ page, **From drawings** takes a PDF drawing set (≤ 25 MB, ≤ `DRAWING_MAX_PAGES` pages). The API rasterises
+each page (pdfjs-dist + @napi-rs/canvas: no system installs), then the worker has Muse Spark sort every sheet and read the
+structural ones (schedules, layout counts). Code, not the model, turns that into proposed BOQ items with their source
+page, evidence and confidence. Quantities the drawings don't state, or where a schedule and a layout disagree, are marked
+"needs input" (a disagreement is listed as a drawing discrepancy). The saved items keep a `drawing_source` line that the
+agent cites ("drawings specify 12 columns; 10 visible as cast"). Spend is capped by `MAX_COST_PER_DRAWING_IMPORT_USD`
+(default $1.00).
+
+Dry run, without the database:
+
+```sh
+pnpm boq-from-drawings --pdf drawings.pdf [--out samples/out/drawings] [--max-cost 0.50]
+```
+
 ## Rules
 
 - Nothing outside `apps/api/src/meta/` imports the `openai` SDK.

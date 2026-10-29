@@ -7,9 +7,11 @@ import { CostLimitError } from "../meta/cost.js";
 import { transcribe } from "../meta/voice.js";
 import { getObject } from "../services/storage.js";
 import { claimNext, releaseStale, type Job } from "../services/jobs.js";
+import { markDrawingImportFailed, runDrawingImport } from "../services/drawings/imports.js";
 
 const VisitPayload = z.object({ visitId: z.number().int() });
 const PhotoPayload = z.object({ photoId: z.number().int() });
+const DrawingPayload = z.object({ importId: z.number().int() });
 
 let stopping = false;
 
@@ -27,6 +29,11 @@ async function handle(job: Job): Promise<void> {
       if (!photo?.voiceNoteKey) return;
       const text = await transcribe(await getObject(photo.voiceNoteKey), photo.voiceNoteKey.split("/").pop());
       await db.update(schema.photos).set({ transcript: text }).where(eq(schema.photos.id, photoId));
+      return;
+    }
+    case "drawing_import": {
+      const { importId } = DrawingPayload.parse(job.payload);
+      console.log(`[worker] drawing import ${importId} → ${await runDrawingImport(importId)}`);
       return;
     }
   }
@@ -50,6 +57,11 @@ async function onFailure(job: Job, err: unknown) {
           },
     )
     .where(eq(schema.jobs.id, job.id));
+
+  if (permanent && job.kind === "drawing_import") {
+    const parsed = DrawingPayload.safeParse(job.payload);
+    if (parsed.success) await markDrawingImportFailed(parsed.data.importId, message);
+  }
 
   // A visit whose agent job gave up goes back to draft so the engineer can re-run it.
   if (permanent && job.kind === "agent_run") {

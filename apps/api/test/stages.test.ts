@@ -78,7 +78,7 @@ describe("1. stages", () => {
   it("validates stage lists", () => {
     const item = (stages: BoqItemInput["stages"], measureMode: BoqItemInput["measureMode"] = "visual_only"): BoqItemInput => ({
       zoneId: null, code: "S", description: "s", unit: "m3", plannedQty: 1, measureMode,
-      segmentTargets: measureMode === "count" ? ["column"] : [], panelPlannedQty: null, stages, sequenceNo: null,
+      segmentTargets: measureMode === "count" ? ["column"] : [], panelPlannedQty: null, stages, sequenceNo: null, drawingSource: null,
     });
     expect(boqItemProblem(item(SLAB_STAGES))).toBeNull();
     expect(boqItemProblem(item([{ name: "a", weight: 0.5 }, { name: "b", weight: 0.4 }]))).toBe("stage weights must sum to 1 (got 0.9)");

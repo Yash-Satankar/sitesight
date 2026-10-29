@@ -41,6 +41,8 @@ export const BoqItemInput = z.object({
    */
   stages: z.array(BoqStage).min(2).nullable().default(null),
   sequenceNo: z.number().int().nullable().default(null),
+  /** Where the planned quantity comes from on the drawings, e.g. "12 nos per column schedule, p.2" (drawing import). */
+  drawingSource: z.string().max(500).nullable().default(null),
 });
 export type BoqItemInput = z.infer<typeof BoqItemInput>;
 

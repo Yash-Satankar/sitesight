@@ -4,6 +4,7 @@ import type {
   BoqItemInput,
   CreateProjectBody,
   CreateZoneBody,
+  DrawingImport,
   ParsedBoqResponse,
   PatchAssessmentBody,
   Photo,
@@ -58,6 +59,13 @@ export const api = {
     form.append("file", file);
     return request<ParsedBoqResponse>(`/projects/${projectId}/boq`, { method: "POST", body: form });
   },
+  /** Upload a drawing set (PDF ≤ 25 MB); pages are read by Muse Spark in the background. */
+  uploadDrawings: (projectId: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<DrawingImport>(`/projects/${projectId}/drawings`, { method: "POST", body: form });
+  },
+  getDrawingImport: (projectId: number, importId: number) => request<DrawingImport>(`/projects/${projectId}/drawings/${importId}`),
   saveBoq: (projectId: number, items: BoqItemInput[]) =>
     request<BoqItem[]>(`/projects/${projectId}/boq`, { method: "PUT", body: JSON.stringify({ items }) }),
 

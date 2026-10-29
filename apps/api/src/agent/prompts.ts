@@ -65,6 +65,8 @@ Rules:
   for the same item again; request_photo returns the existing open request for an item instead of a new one.
 - Record one assessment per BOQ item with record_assessment. percent_complete is 0–100 and never above 100.
   Report a deviation when the evidence shows work out of sequence, a material mismatch, or work not per the BOQ description.
+- Drawings: when an item has drawing_source, planned_qty comes from the drawings. Compare what you see with it in the
+  rationale, citing the sheet, e.g. "drawings specify 12 columns (column schedule p.2); 10 visible as cast".
 - Never invent BOQ items, photo ids or segment ids. Only use ids returned by the tools.
 - When every relevant item is assessed or has an open photo request, call finish with a short summary.`;
 }

@@ -47,6 +47,8 @@ export const boqItems = pgTable("boq_items", {
   // Visual-only items built in stages: [{ name, weight }], weights sum to 1.
   stages: jsonb("stages").$type<{ name: string; weight: number }[]>(),
   sequenceNo: integer("sequence_no"),
+  // Drawing import: where the planned quantity comes from, e.g. "12 nos per column schedule, p.2". Shown to the agent.
+  drawingSource: text("drawing_source"),
 });
 
 export const visits = pgTable("visits", {
@@ -243,7 +245,7 @@ export const jobs = pgTable(
   "jobs",
   {
     id: serial("id").primaryKey(),
-    kind: text("kind", { enum: ["agent_run", "transcribe"] }).notNull(),
+    kind: text("kind", { enum: ["agent_run", "transcribe", "drawing_import"] }).notNull(),
     payload: jsonb("payload").notNull(),
     status: text("status", { enum: ["pending", "running", "done", "failed"] })
       .notNull()
@@ -264,3 +266,48 @@ export const reports = pgTable("reports", {
   storageKey: text("storage_key").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** One uploaded drawing set (PDF) being turned into a proposed BOQ. */
+export const drawingImports = pgTable("drawing_imports", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  status: text("status", { enum: ["queued", "processing", "done", "cost_limit", "failed"] })
+    .notNull()
+    .default("queued"),
+  costUsd: numeric("cost_usd", { mode: "number" }).notNull().default(0),
+  inputTokens: integer("input_tokens").notNull().default(0),
+  outputTokens: integer("output_tokens").notNull().default(0),
+  proposal: jsonb("proposal"), // BoqProposal, once assembled
+  error: text("error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const drawingPages = pgTable(
+  "drawing_pages",
+  {
+    id: serial("id").primaryKey(),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    importId: integer("import_id")
+      .notNull()
+      .references(() => drawingImports.id, { onDelete: "cascade" }),
+    pageNo: integer("page_no").notNull(),
+    storageKey: text("storage_key").notNull(), // PNG, long edge <= 2000 px
+    thumbKey: text("thumb_key").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    titleGuess: text("title_guess"),
+    sheetType: text("sheet_type"),
+    status: text("status", { enum: ["pending", "classified", "extracted", "skipped", "failed"] })
+      .notNull()
+      .default("pending"),
+    classification: jsonb("classification"), // PageClassification
+    extraction: jsonb("extraction"), // SheetExtraction
+    error: text("error"),
+  },
+  (t) => [index("drawing_pages_import_idx").on(t.importId, t.pageNo)],
+);

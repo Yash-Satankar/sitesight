@@ -18,12 +18,14 @@
     "test": "vitest run",
     "agent-dry-run": "tsx scripts/agent-dry-run.ts",
     "e2e-smoke": "tsx scripts/e2e-smoke.ts",
-    "db:purge-e2e": "tsx scripts/purge-e2e.ts"
+    "db:purge-e2e": "tsx scripts/purge-e2e.ts",
+    "boq-from-drawings": "tsx scripts/boq-from-drawings.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.700.0",
     "@aws-sdk/s3-request-presigner": "^3.700.0",
     "@meta-sam/parser": "0.1.0",
+    "@napi-rs/canvas": "0.1.77",
     "@sitesight/shared": "workspace:*",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -32,6 +34,7 @@
     "express": "^5.1.0",
     "multer": "^2.0.0",
     "openai": "^5.0.0",
+    "pdfjs-dist": "5.4.149",
     "pdfkit": "^0.17.0",
     "postgres": "^3.4.5",
     "sharp": "^0.34.0",

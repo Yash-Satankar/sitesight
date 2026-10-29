@@ -57,6 +57,13 @@
       "when": 1793267721564,
       "tag": "0007_unknown_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793268433177,
+      "tag": "0008_slippery_wong",
+      "breakpoints": true
     }
   ]
 }

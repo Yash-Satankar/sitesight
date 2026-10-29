@@ -77,7 +77,7 @@ export function maskLabel(s: { id: number; concept: string; score: number; verif
 
 const DESCRIPTIONS: Record<ToolName, string> = {
   list_boq_items:
-    "List BOQ items (optionally for one zone) with unit, planned_qty, measure_mode and segment_targets (what segment_photo can find for the item).",
+    "List BOQ items (optionally for one zone) with unit, planned_qty, measure_mode, segment_targets (what segment_photo can find for the item) and, when the BOQ came from drawings, drawing_source (which sheet and page planned_qty comes from).",
   list_photos: "List photos in this visit (optionally for one zone) with transcript and whether segments exist.",
   view_photo:
     `Look at a photo. with_masks=true overlays this photo's masks, each labelled #<segment_id> <target> <score>; rejected segments are hidden. draw_panel outlines a measurement panel (same format as measure's panel) so you can check it before measuring; at most ${MAX_PANEL_PREVIEWS} previews per photo. Only the latest image of each photo stays in the conversation.`,
@@ -161,6 +161,8 @@ const handlers: Handlers = {
         stages: r.stages,
         measure_mode: r.measureMode,
         segment_targets: r.segmentTargets,
+        // Where planned_qty comes from on the drawings (drawing import), e.g. "12 nos per Column schedule p.2".
+        ...(r.drawingSource ? { drawing_source: r.drawingSource } : {}),
       })),
     };
   },

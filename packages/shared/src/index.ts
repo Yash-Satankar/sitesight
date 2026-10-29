@@ -5,3 +5,4 @@ export * from "./schemas/agent.js";
 export * from "./schemas/api.js";
 export * from "./trace-cards.js";
 export * from "./progress.js";
+export * from "./schemas/drawings.js";

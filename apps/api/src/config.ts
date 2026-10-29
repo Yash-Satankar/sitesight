@@ -28,6 +28,11 @@ const Env = z.object({
   SAM_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(3), // parallel SAM requests per segment() call
   MAX_IMAGES_IN_CONTEXT: z.coerce.number().int().min(1).default(3), // images kept in the agent conversation (oldest dropped)
 
+  // BOQ from drawings
+  MAX_COST_PER_DRAWING_IMPORT_USD: z.coerce.number().positive().default(1.0),
+  DRAWING_MAX_PAGES: z.coerce.number().int().positive().default(40),
+  DRAWING_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(3), // parallel Spark calls per import
+
   // Infra
   PORT: z.coerce.number().int().default(8787),
   DATABASE_URL: z.string().default(""), // checked in db/client.ts so scripts without a DB can still run

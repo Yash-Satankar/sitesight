@@ -105,3 +105,65 @@ function extractJson(text: string): unknown {
     return undefined;
   }
 }
+
+/** Called around every Spark call of a metered job (e.g. a drawing import) to enforce its own cost cap. */
+export interface CostMeter {
+  /** Before a call: throw to stop (e.g. the cap is reached). */
+  beforeCall(): void | Promise<void>;
+  /** After a call: record its tokens and cost. */
+  record(usage: UsageCost): void | Promise<void>;
+  /** The call failed and is not billed (optional). */
+  cancel?(): void;
+}
+
+export class JsonValidationError extends Error {
+  constructor(public readonly issues: string[]) {
+    super(`Spark returned invalid JSON after one retry: ${issues.slice(0, 5).join("; ")}`);
+    this.name = "JsonValidationError";
+  }
+}
+
+export type SparkContent = Exclude<OpenAI.Responses.ResponseInputMessageContentList, string>;
+
+/** PNG/JPEG bytes as an input_image part ("high" detail so small schedule text stays legible). */
+export function imagePart(bytes: Buffer, mime = "image/png", detail: "high" | "auto" | "low" = "high"): SparkContent[number] {
+  return { type: "input_image", image_url: `data:${mime};base64,${bytes.toString("base64")}`, detail };
+}
+
+/** zod issues as "path: message" lines the model can act on. */
+export function zodIssues(error: z.ZodError): string[] {
+  return error.issues.map((i) => `${i.path.length ? i.path.join(".") : "(root)"}: ${i.message}`);
+}
+
+/**
+ * Ask Spark for JSON matching `schema` from text and/or images. If the output does not validate, the issues are sent
+ * back and the model gets one retry. Every call is billed through `meter`.
+ */
+export async function respondJsonContent<S extends z.ZodTypeAny>(
+  schema: S,
+  opts: { instructions: string; content: SparkContent; meter?: CostMeter },
+): Promise<{ data: z.output<S>; attempts: number }> {
+  const input: SparkInputItem[] = [{ role: "user", content: opts.content }];
+  let issues: string[] = [];
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    await opts.meter?.beforeCall();
+    let resp: SparkResponse;
+    try {
+      resp = await respond({ instructions: opts.instructions, input });
+    } catch (err) {
+      opts.meter?.cancel?.();
+      throw err;
+    }
+    await opts.meter?.record(estimateCost(resp));
+    const text = resp.output_text ?? "";
+    const json = extractJson(text);
+    const parsed = schema.safeParse(json);
+    if (parsed.success) return { data: parsed.data, attempts: attempt };
+    issues = json === undefined ? ["(root): the reply did not contain a JSON object"] : zodIssues(parsed.error);
+    input.push(
+      { role: "assistant", content: text },
+      { role: "user", content: `That JSON does not match the schema:\n${issues.map((i) => `- ${i}`).join("\n")}\nReturn only the corrected JSON object.` },
+    );
+  }
+  throw new JsonValidationError(issues);
+}

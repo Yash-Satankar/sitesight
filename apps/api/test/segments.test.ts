@@ -454,6 +454,7 @@ describe("BOQ rules", () => {
     panelPlannedQty: null,
     stages: null,
     sequenceNo: null,
+    drawingSource: null,
   });
 
   it("accepts column counts, brickwork areas and visual-only items", () => {
