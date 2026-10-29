@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { BoqItem, BoqItemInput } from "./boq.js";
-import { Assessment, AskBack } from "./assessment.js";
+import { Assessment, AskBack, AssessmentStatus, EvidenceBasis } from "./assessment.js";
 import { VisitStatus } from "./agent.js";
 import { ProgressRow } from "../progress.js";
 
@@ -18,6 +18,21 @@ export const Project = z.object({
   createdAt: z.string(),
 });
 export type Project = z.infer<typeof Project>;
+
+/** GET /projects rows: a project plus the numbers its card shows. */
+export const ProjectListItem = Project.extend({
+  /**
+   * Planned-qty-weighted average of each BOQ item's latest confirmed (accepted/edited) percent; items without one
+   * count as 0. Null when the project has no BOQ items with a planned quantity.
+   */
+  overallPercent: z.number().nullable(),
+  /** Confirmed items counted in overallPercent whose latest assessment is inferred (not billable). */
+  inferredItems: z.number().int(),
+  lastVisitDate: z.string().nullable(),
+  /** Photo requests still open across the project's visits. */
+  openAskBacks: z.number().int(),
+});
+export type ProjectListItem = z.infer<typeof ProjectListItem>;
 
 export const Zone = z.object({
   id: z.number().int(),
@@ -42,12 +57,32 @@ export const VisitSummary = z.object({
 });
 export type VisitSummary = z.infer<typeof VisitSummary>;
 
+/** One assessment of a BOQ item, as summarised on the project page. */
+export const ItemAssessmentSummary = z.object({
+  assessmentId: z.number().int(),
+  visitId: z.number().int(),
+  visitDate: z.string(),
+  percentComplete: z.number(),
+  stageReached: z.string().nullable(),
+  basis: EvidenceBasis,
+  status: AssessmentStatus,
+});
+export type ItemAssessmentSummary = z.infer<typeof ItemAssessmentSummary>;
+
 export const ProjectDetail = Project.extend({
   zones: z.array(Zone),
   boqItems: z.array(BoqItem),
   visits: z.array(VisitSummary),
   /** Latest accepted/edited percent_complete, keyed by boq item id. */
   progress: z.record(z.string(), z.number()),
+  /**
+   * Per BOQ item id: `confirmed` is the assessment behind `progress` (latest accepted/edited); `latest` is the newest
+   * assessment of any status (may be a proposed one still to review). Items never assessed are absent.
+   */
+  itemAssessments: z.record(
+    z.string(),
+    z.object({ confirmed: ItemAssessmentSummary.nullable(), latest: ItemAssessmentSummary }),
+  ),
 });
 export type ProjectDetail = z.infer<typeof ProjectDetail>;
 
@@ -135,12 +170,15 @@ export type VisitDetail = z.infer<typeof VisitDetail>;
 export const FulfilAskBackBody = z.object({ photoId: z.number().int() });
 export type FulfilAskBackBody = z.infer<typeof FulfilAskBackBody>;
 
-export const PatchAssessmentBody = z.object({
+export const ReviewAssessmentBody = z.object({
   action: z.enum(["accept", "edit"]),
   percentComplete: z.number().min(0).max(100).optional(),
   qtyDone: z.number().nonnegative().nullable().optional(),
   engineerNote: z.string().optional(),
 });
+/** Undo an acceptance/edit: back to "proposed". Refused once a report has been generated since the review. */
+export const RevertAssessmentBody = z.object({ status: z.literal("proposed") }).strict();
+export const PatchAssessmentBody = z.union([ReviewAssessmentBody, RevertAssessmentBody]);
 export type PatchAssessmentBody = z.infer<typeof PatchAssessmentBody>;
 
 export const ReportResponse = z.object({ reportId: z.number().int(), downloadUrl: z.string() });

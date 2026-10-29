@@ -53,7 +53,7 @@ export function ProjectPage() {
           >
             Bill of quantities
           </SectionTitle>
-          <BoqTable items={project.boqItems} progress={project.progress} />
+          <BoqTable items={project.boqItems} progress={project.progress} itemAssessments={project.itemAssessments} />
         </section>
 
         <div className="grid gap-5 md:grid-cols-2">

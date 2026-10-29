@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Building2, ChevronRight, MapPin, Plus, X } from "lucide-react";
+import { Building2, CalendarDays, Camera, ChevronRight, MapPin, Plus, TriangleAlert, X } from "lucide-react";
 import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { ErrorNote } from "../components/Layout";
-import { BottomBar, BottomBarSpacer, EmptyState, Loading, fmtDate } from "../components/ui";
+import { BottomBar, BottomBarSpacer, EmptyState, Loading, ProgressRing, fmtDate } from "../components/ui";
 
 export function ProjectsPage() {
   const { data: projects, error, loading } = useAsync(() => api.listProjects(), []);
@@ -34,9 +34,7 @@ export function ProjectsPage() {
           {projects?.map((p) => (
             <li key={p.id}>
               <Link to={`/projects/${p.id}`} className="card flex min-h-20 items-center gap-3 transition-colors hover:border-slate-400 active:bg-slate-50">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
-                  <Building2 className="h-6 w-6" aria-hidden />
-                </span>
+                <ProgressRing pct={p.overallPercent} size={60} />
                 <span className="min-w-0 flex-1">
                   <span className="line-clamp-2 text-base leading-snug font-bold">{p.name}</span>
                   <span className="mt-0.5 flex min-w-0 items-center gap-1 text-sm text-slate-600">
@@ -47,6 +45,24 @@ export function ProjectsPage() {
                       </>
                     ) : (
                       <span>Created {fmtDate(p.createdAt.slice(0, 10))}</span>
+                    )}
+                  </span>
+                  <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                    <span className="num inline-flex items-center gap-1 text-slate-700">
+                      <CalendarDays className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      {p.lastVisitDate ? `Last visit ${fmtDate(p.lastVisitDate, false)}` : "No visits yet"}
+                    </span>
+                    {p.openAskBacks > 0 && (
+                      <span className="num inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-900">
+                        <Camera className="h-3.5 w-3.5" aria-hidden />
+                        {p.openAskBacks} photo request{p.openAskBacks === 1 ? "" : "s"}
+                      </span>
+                    )}
+                    {p.inferredItems > 0 && (
+                      <span className="num inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-950" title="Counted in the overall %, but not billable until observed">
+                        <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
+                        {p.inferredItems} inferred
+                      </span>
                     )}
                   </span>
                 </span>

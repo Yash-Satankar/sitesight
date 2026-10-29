@@ -7,7 +7,7 @@
  * No Meta calls, nothing written to the real database. Then starts Vite and captures each screen at 390×844 and
  * 1280×800 into samples/out/ui/<timestamp>[-label]/.
  */
-import { mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -298,12 +298,25 @@ async function main() {
   await vite.listen();
   const WEB = `http://127.0.0.1:${args["web-port"]}`;
 
-  const screens: { name: string; path: string; ready: string }[] = [
+  // A photo to upload on the capture screen (proves the strip refreshes with the real thumbnail).
+  const uploadFile = join(outDir, "upload.jpg");
+  await writeFile(uploadFile, (await demoImages(3))[2]!);
+  const screens: { name: string; path: string; ready: string; act?: (page: import("playwright").Page) => Promise<void> }[] = [
     { name: "01-projects", path: "/", ready: "text=Demo Residence" },
     { name: "02-project", path: `/projects/${ids.projectId}`, ready: "text=SLB-GF" },
     { name: "03-project-empty", path: `/projects/${ids.emptyProjectId}`, ready: "text=Patel Warehouse" },
     { name: "04-boq-upload", path: `/projects/${ids.emptyProjectId}/boq`, ready: "text=Choose the BOQ" },
     { name: "05-capture", path: `/visits/${ids.v4}/capture`, ready: "text=GF" },
+    {
+      name: "05b-capture-uploaded",
+      path: `/visits/${ids.v4}/capture`,
+      ready: "text=GF",
+      act: async (page) => {
+        await page.locator("input[type=file][accept='image/*']").setInputFiles(uploadFile);
+        await page.getByRole("button", { name: /Upload & take next/ }).click();
+        await page.getByText(/In this visit · 2 photos/).waitFor({ timeout: 15_000 });
+      },
+    },
     { name: "06-capture-request", path: `/visits/${ids.v4}/capture?zone=${ids.zoneId}&askBack=${ids.askBackId}`, ready: "text=footing" },
     { name: "07-visit-assessed", path: `/visits/${ids.v2}`, ready: "text=Measured" },
     { name: "08-visit-running", path: `/visits/${ids.v3}`, ready: "text=columns" },
@@ -327,6 +340,13 @@ async function main() {
         await page.locator(s.ready).first().waitFor({ timeout: 15_000 });
       } catch {
         console.warn(`  ${s.name}: "${s.ready}" not found; capturing anyway`);
+      }
+      if (s.act) {
+        try {
+          await s.act(page);
+        } catch (err) {
+          console.warn(`  ${s.name}: action failed: ${err instanceof Error ? err.message.split("\n")[0] : err}`);
+        }
       }
       await page.waitForTimeout(1200); // SSE replay, smooth scroll
       // Scroll through the page so lazy images load, then back to the top for the capture.

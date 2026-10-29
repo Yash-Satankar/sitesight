@@ -10,6 +10,7 @@ import type {
   PresignResponse,
   Project,
   ProjectDetail,
+  ProjectListItem,
   ReportResponse,
   VisitDetail,
   VisitStatus,
@@ -48,7 +49,7 @@ const post = <T>(path: string, body?: unknown) =>
   request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
 
 export const api = {
-  listProjects: () => request<Project[]>("/projects"),
+  listProjects: () => request<ProjectListItem[]>("/projects"),
   createProject: (body: CreateProjectBody) => post<Project>("/projects", body),
   getProject: (id: number) => request<ProjectDetail>(`/projects/${id}`),
 

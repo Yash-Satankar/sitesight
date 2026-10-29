@@ -1,9 +1,10 @@
 import { Router } from "express";
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { CreateProjectBody, type Project, type ProjectDetail } from "@sitesight/shared";
+import { and, desc, eq, inArray, max, count } from "drizzle-orm";
+import { CreateProjectBody, type Project, type ProjectDetail, type ProjectListItem } from "@sitesight/shared";
 import { db, schema } from "../db/client.js";
 import { intParam, notFound, parse } from "../lib/http.js";
 import { toVisitSummary } from "../lib/queries.js";
+import { itemAssessmentsByProject, overallPercent } from "../lib/item-progress.js";
 
 export const projectsRouter = Router();
 
@@ -17,7 +18,36 @@ const toProject = (p: ProjectRow): Project => ({
 
 projectsRouter.get("/projects", async (_req, res) => {
   const rows = await db.select().from(schema.projects).orderBy(desc(schema.projects.createdAt));
-  res.json(rows.map(toProject));
+  const ids = rows.map((p) => p.id);
+  if (!ids.length) return void res.json([]);
+  const [items, lastVisits, openAsks, assessments] = await Promise.all([
+    db
+      .select({ projectId: schema.boqItems.projectId, id: schema.boqItems.id, plannedQty: schema.boqItems.plannedQty })
+      .from(schema.boqItems)
+      .where(inArray(schema.boqItems.projectId, ids)),
+    db
+      .select({ projectId: schema.visits.projectId, last: max(schema.visits.visitDate) })
+      .from(schema.visits)
+      .where(inArray(schema.visits.projectId, ids))
+      .groupBy(schema.visits.projectId),
+    db
+      .select({ projectId: schema.visits.projectId, n: count() })
+      .from(schema.askBacks)
+      .innerJoin(schema.visits, eq(schema.visits.id, schema.askBacks.visitId))
+      .where(and(inArray(schema.visits.projectId, ids), eq(schema.askBacks.status, "open")))
+      .groupBy(schema.visits.projectId),
+    itemAssessmentsByProject(ids),
+  ]);
+  const list: ProjectListItem[] = rows.map((p) => ({
+    ...toProject(p),
+    ...overallPercent(
+      items.filter((i) => i.projectId === p.id),
+      assessments.get(p.id),
+    ),
+    lastVisitDate: lastVisits.find((v) => v.projectId === p.id)?.last ?? null,
+    openAskBacks: Number(openAsks.find((a) => a.projectId === p.id)?.n ?? 0),
+  }));
+  res.json(list);
 });
 
 projectsRouter.post("/projects", async (req, res) => {
@@ -39,24 +69,13 @@ projectsRouter.get("/projects/:id", async (req, res) => {
     .where(eq(schema.visits.projectId, id))
     .orderBy(desc(schema.visits.visitDate), desc(schema.visits.id));
 
-  // Latest engineer-confirmed percent per BOQ item (visits are already newest-first).
+  // Latest engineer-confirmed percent per BOQ item, plus the newest assessment of any status.
+  const byItem = (await itemAssessmentsByProject([id])).get(id) ?? new Map();
   const progress: Record<string, number> = {};
-  if (visits.length) {
-    const confirmed = await db
-      .select({ boqItemId: schema.assessments.boqItemId, pct: schema.assessments.percentComplete, visitId: schema.assessments.visitId })
-      .from(schema.assessments)
-      .where(
-        and(
-          inArray(
-            schema.assessments.visitId,
-            visits.map((v) => v.id),
-          ),
-          inArray(schema.assessments.status, ["accepted", "edited"]),
-        ),
-      );
-    const order = new Map(visits.map((v, i) => [v.id, i]));
-    confirmed.sort((a, b) => order.get(a.visitId)! - order.get(b.visitId)!);
-    for (const c of confirmed) progress[String(c.boqItemId)] ??= c.pct;
+  const itemAssessments: ProjectDetail["itemAssessments"] = {};
+  for (const [itemId, entry] of byItem) {
+    if (entry.confirmed) progress[String(itemId)] = entry.confirmed.percentComplete;
+    itemAssessments[String(itemId)] = entry;
   }
 
   const detail: ProjectDetail = {
@@ -78,6 +97,7 @@ projectsRouter.get("/projects/:id", async (req, res) => {
     })),
     visits: visits.map(toVisitSummary),
     progress,
+    itemAssessments,
   };
   res.json(detail);
 });

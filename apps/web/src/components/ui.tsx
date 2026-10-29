@@ -159,15 +159,3 @@ export function photoLabel(photoIds: number[], id: number): string {
 export function capitalize(s: string): string {
   return s ? s[0]!.toUpperCase() + s.slice(1) : s;
 }
-
-/** Latest completed stage implied by a staged item's percent (cumulative weights), for display. */
-export function stageForPercent(stages: { name: string; weight: number }[] | null | undefined, pct: number | undefined): string | null {
-  if (!stages?.length || pct == null) return null;
-  let cum = 0;
-  let reached: string | null = null;
-  for (const s of stages) {
-    cum += s.weight * 100;
-    if (pct + 0.5 >= cum) reached = s.name;
-  }
-  return reached;
-}

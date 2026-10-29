@@ -181,6 +181,8 @@ export const assessments = pgTable(
       .notNull()
       .default("proposed"),
     engineerNote: text("engineer_note"),
+    /** When the engineer last accepted/edited it; cleared on undo. Undo is refused if a report was generated after this. */
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     stageReached: text("stage_reached"), // staged items: latest completed stage named by the agent
     // observed in this visit's photos, or inferred (hidden earlier-sequence work; not billable until observed)
     basis: text("basis", { enum: ["observed", "inferred"] }).notNull().default("observed"),

@@ -14,7 +14,7 @@ export function CapturePage() {
   const askBackId = params.get("askBack") ? Number(params.get("askBack")) : undefined;
   const navigate = useNavigate();
 
-  const { data } = useAsync(async () => {
+  const { data, reload } = useAsync(async () => {
     const visit = await api.getVisit(visitId);
     const project = await api.getProject(visit.projectId);
     return { visit, project };
@@ -23,7 +23,6 @@ export function CapturePage() {
   const [zoneId, setZoneId] = useState<number | null>(params.get("zone") ? Number(params.get("zone")) : null);
   const [photo, setPhoto] = useState<File | null>(null);
   const [voice, setVoice] = useState<Blob | null>(null);
-  const [uploaded, setUploaded] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,8 +47,8 @@ export function CapturePage() {
         navigate(`/visits/${visitId}`);
         return;
       }
-      setUploaded((n) => n + 1);
       setPhoto(null);
+      await reload(); // the strip shows the new photo's real thumbnail
       setVoice(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -67,7 +66,7 @@ export function CapturePage() {
     }
   }
 
-  const existing = (data?.visit.photos.length ?? 0) + uploaded;
+  const existing = data?.visit.photos.length ?? 0;
   const zones = data?.project.zones ?? [];
   const zoneName = (id: number) => zones.find((z) => z.id === id)?.name;
   const itemCode = (id: number | null) => (id == null ? undefined : data?.project.boqItems.find((b) => b.id === id)?.code);
@@ -168,13 +167,6 @@ export function CapturePage() {
                     className="h-20 w-20 shrink-0 rounded-xl bg-slate-200 object-cover"
                   />
                 ))}
-                {uploaded > 0 && (
-                  <span className="flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-xl bg-green-50 text-green-900">
-                    <Check className="h-5 w-5" aria-hidden />
-                    <span className="num text-sm font-bold">+{uploaded}</span>
-                    <span className="text-xs">uploaded</span>
-                  </span>
-                )}
               </div>
             ) : (
               <p className="flex items-center gap-2 text-sm text-slate-600">

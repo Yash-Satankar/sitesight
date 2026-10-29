@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Check, FileText, Pencil, Ruler, TriangleAlert } from "lucide-react";
+import { Check, FileText, Pencil, Ruler, TriangleAlert, Undo2 } from "lucide-react";
 import type { Assessment, BoqItem, Photo } from "@sitesight/shared";
 import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
@@ -97,6 +97,17 @@ function ReviewCard({
         ...(action === "edit" ? { percentComplete: pct, qtyDone: qty === "" ? null : Number(qty) } : {}),
       });
       setEditing(false);
+      await onChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /** Back to "proposed"; the API refuses (with a reason) if a report generated since already includes it. */
+  async function undo() {
+    setError(null);
+    try {
+      await api.patchAssessment(a.id, { status: "proposed" });
       await onChange();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -204,8 +215,9 @@ function ReviewCard({
       ) : confirmed ? (
         <div className="flex min-h-12 items-center gap-2 rounded-xl bg-green-50 px-3">
           <span className="font-semibold text-green-900">{a.status === "edited" ? "Edited ✓" : "Accepted ✓"}</span>
-          <button className="btn-ghost ml-auto min-h-11 text-sm text-slate-700" onClick={() => setEditing(true)}>
-            <Pencil className="h-4 w-4" aria-hidden /> Change
+          <span className="text-green-900" aria-hidden>·</span>
+          <button className="btn-ghost min-h-11 px-2 text-sm font-semibold text-slate-800 underline underline-offset-2" onClick={undo}>
+            <Undo2 className="h-4 w-4" aria-hidden /> Undo
           </button>
         </div>
       ) : (
