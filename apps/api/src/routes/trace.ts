@@ -4,6 +4,7 @@ import type { AgentStep } from "@sitesight/shared";
 import { db, schema } from "../db/client.js";
 import { intParam } from "../lib/http.js";
 import { getVisitOr404 } from "../lib/queries.js";
+import { visitSpendUsd } from "../meta/cost.js";
 
 export const traceRouter = Router();
 
@@ -12,7 +13,7 @@ const POLL_MS = 700;
 /**
  * SSE stream of agent_steps for a visit. The agent runs in the worker process,
  * so this tails the table instead of listening to an in-memory emitter.
- * Events: "step" (AgentStep) and "status" ({ status }). Resumes from Last-Event-ID.
+ * Events: "step" (AgentStep), "status" ({ status }) and "cost" ({ costUsd }: visit total). Resumes from Last-Event-ID.
  */
 traceRouter.get("/visits/:id/trace", async (req, res) => {
   const visitId = intParam(req.params.id);
@@ -23,6 +24,7 @@ traceRouter.get("/visits/:id/trace", async (req, res) => {
 
   let lastId = Number(req.get("Last-Event-ID") ?? req.query.after ?? 0) || 0;
   let lastStatus = "";
+  let lastCost = -1;
   let closed = false;
   req.on("close", () => (closed = true));
 
@@ -53,6 +55,12 @@ traceRouter.get("/visits/:id/trace", async (req, res) => {
     if (v && v.status !== lastStatus) {
       lastStatus = v.status;
       res.write(`event: status\ndata: ${JSON.stringify({ status: v.status })}\n\n`);
+    }
+    // Running cost of the visit (all its runs), for the trace header.
+    const cost = Math.round((await visitSpendUsd(visitId)) * 10000) / 10000;
+    if (cost !== lastCost) {
+      lastCost = cost;
+      res.write(`event: cost\ndata: ${JSON.stringify({ costUsd: cost })}\n\n`);
     }
     if (!rows.length) res.write(": ping\n\n");
     await new Promise((r) => setTimeout(r, POLL_MS));

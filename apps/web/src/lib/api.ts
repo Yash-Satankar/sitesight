@@ -91,10 +91,11 @@ export async function uploadFile(visitId: number, blob: Blob, kind: "photo" | "v
 /** Subscribe to the live agent trace. Returns an unsubscribe function. */
 export function subscribeTrace(
   visitId: number,
-  handlers: { onStep: (s: AgentStep) => void; onStatus: (s: VisitStatus) => void },
+  handlers: { onStep: (s: AgentStep) => void; onStatus: (s: VisitStatus) => void; onCost?: (usd: number) => void },
 ): () => void {
   const es = new EventSource(`${API_URL}/visits/${visitId}/trace`);
   es.addEventListener("step", (e) => handlers.onStep(JSON.parse((e as MessageEvent).data)));
   es.addEventListener("status", (e) => handlers.onStatus(JSON.parse((e as MessageEvent).data).status));
+  es.addEventListener("cost", (e) => handlers.onCost?.(JSON.parse((e as MessageEvent).data).costUsd));
   return () => es.close();
 }

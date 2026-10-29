@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { AgentStep } from "@sitesight/shared";
 import { api, subscribeTrace } from "../lib/api";
@@ -17,18 +17,28 @@ export function VisitPage() {
     return { visit, project };
   }, [visitId]);
   const [steps, setSteps] = useState<AgentStep[]>([]);
+  const [costUsd, setCostUsd] = useState<number | null>(null);
+  const [liveStatus, setLiveStatus] = useState<string | undefined>();
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     setSteps([]);
+    setCostUsd(null);
     return subscribeTrace(visitId, {
       onStep: (s) => {
         setSteps((prev) => [...prev, s]);
         if (s.kind === "tool_result" && (s.name === "record_assessment" || s.name === "request_photo")) void reload();
       },
-      onStatus: () => void reload(),
+      onStatus: (status) => {
+        setLiveStatus(status);
+        void reload();
+      },
+      onCost: setCostUsd,
     });
   }, [visitId, reload]);
+
+  const codes = useMemo(() => new Map((data?.project.boqItems ?? []).map((b) => [b.id, b.code])), [data]);
+  const itemCode = useCallback((id: number) => codes.get(id), [codes]);
 
   if (error) return <ErrorNote error={error} />;
   if (!data) return <p className="text-sm text-gray-500">Loading…</p>;
@@ -76,10 +86,7 @@ export function VisitPage() {
       <ErrorNote error={actionError} />
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <section className="card max-h-[75vh] overflow-y-auto">
-          <h2 className="mb-3 font-semibold">Agent trace</h2>
-          <AgentTrace steps={steps} />
-        </section>
+        <AgentTrace steps={steps} costUsd={costUsd} status={liveStatus ?? visit.status} itemCode={itemCode} />
 
         <section className="space-y-3">
           {openAskBacks.map((a) => (
