@@ -113,3 +113,30 @@ await sql.end();`;
     expect(JSON.parse(res.stdout.trim().split("\n").at(-1)!)).toEqual({ id: 1, panelRows: 0 });
   });
 });
+
+describe("--visits from PowerShell", () => {
+  const dirs = new Set(["samples/demo-residence/v1", "samples/demo-residence/v2", "site photos/day 1"]);
+  const isDir = (p: string) => dirs.has(p);
+
+  it("splits a space-joined list (unquoted a,b in PowerShell) when every part is a folder", async () => {
+    const { expandVisitDirs } = await import("../scripts/dry-run-lib.js");
+    expect(expandVisitDirs(["samples/demo-residence/v1 samples/demo-residence/v2"], isDir)).toEqual(["samples/demo-residence/v1", "samples/demo-residence/v2"]);
+    expect(expandVisitDirs(["samples/demo-residence/v1", "samples/demo-residence/v2"], isDir)).toEqual(["samples/demo-residence/v1", "samples/demo-residence/v2"]);
+  });
+
+  it("keeps existing folders that contain spaces whole", async () => {
+    const { expandVisitDirs } = await import("../scripts/dry-run-lib.js");
+    expect(expandVisitDirs(["site photos/day 1", "samples/demo-residence/v2"], isDir)).toEqual(["site photos/day 1", "samples/demo-residence/v2"]);
+  });
+
+  it("names missing folders and shows the PowerShell quoting", async () => {
+    const { expandVisitDirs } = await import("../scripts/dry-run-lib.js");
+    expect(() => expandVisitDirs(["samples/demo-residence/v1 samples/demo-residence/v9"], isDir)).toThrow(
+      /Visit folder not found: "samples\/demo-residence\/v1 samples\/demo-residence\/v9"\. In PowerShell, quote the list: --visits "samples\/demo-residence\/v1,samples\/demo-residence\/v2"/,
+    );
+  });
+
+  it("accepts repeated --visits flags", () => {
+    expect(parseDryRunArgs(["--visits", "a", "--visits", "b,c", "--boq", "x.json"]).visits).toEqual(["a", "b", "c"]);
+  });
+});

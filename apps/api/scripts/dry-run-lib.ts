@@ -32,18 +32,43 @@ export function parseDryRunArgs(argv: string[]): DryRunArgs {
     strict: true,
     options: {
       photos: { type: "string" },
-      visits: { type: "string" },
+      visits: { type: "string", multiple: true },
       boq: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
   if (values.help) return { visits: [], boq: "", help: true };
   if (positionals.length) throw new Error(`Unexpected arguments: ${positionals.join(" ")}`);
-  if (values.photos && values.visits) throw new Error("Use either --photos (one visit) or --visits (several), not both.");
-  const visits = values.photos ? [values.photos] : (values.visits ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+  if (values.photos && values.visits?.length) throw new Error("Use either --photos (one visit) or --visits (several), not both.");
+  const visits = values.photos ? [values.photos] : (values.visits ?? []).flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean);
   if (!visits.length) throw new Error("--photos <dir> or --visits <dir1,dir2,…> is required");
   if (!values.boq) throw new Error("--boq <file.json|file.xlsx> is required");
   return { visits, boq: values.boq, help: false };
+}
+
+/**
+ * PowerShell turns an unquoted `--visits a,b` into one argument "a b". A visit argument that is not an existing
+ * folder but whose space-separated parts all are is split into those parts. Paths with spaces that exist are
+ * kept whole. Returns the folders, or throws naming the ones that do not exist.
+ */
+export function expandVisitDirs(visits: string[], isDir: (path: string) => boolean): string[] {
+  const out: string[] = [];
+  const missing: string[] = [];
+  for (const v of visits) {
+    if (isDir(v)) {
+      out.push(v);
+      continue;
+    }
+    const parts = v.split(/\s+/).filter(Boolean);
+    if (parts.length > 1 && parts.every(isDir)) out.push(...parts);
+    else missing.push(v);
+  }
+  if (missing.length) {
+    throw new Error(
+      `Visit folder not found: ${missing.map((m) => `"${m}"`).join(", ")}. In PowerShell, quote the list: --visits "samples/demo-residence/v1,samples/demo-residence/v2"`,
+    );
+  }
+  return out;
 }
 
 // ---- photos → zones ----
