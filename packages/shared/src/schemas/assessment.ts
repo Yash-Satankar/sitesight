@@ -29,6 +29,8 @@ export const Assessment = z.object({
   status: AssessmentStatus,
   engineerNote: z.string().nullable(),
   basis: EvidenceBasis,
+  /** Staged items: latest completed stage. */
+  stageReached: z.string().nullable(),
   evidence: z.array(Evidence),
   /** Panel measurements behind qty_done (area items): drawn on the evidence photo in review. */
   panels: z.array(z.object({ id: z.number().int(), photoId: z.number().int(), fraction: z.number() })),

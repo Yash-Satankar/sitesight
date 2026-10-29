@@ -138,6 +138,7 @@ describe("multi-visit dry run", () => {
       previous: "25% (shuttering)",
       now: "100% (concreting)",
       change: "+75 pts",
+      delta: 75,
     });
 
     expect(text).toMatch(/=== All visits ===\nVisits: 2 {3}Steps: \d+ {3}Total cost: \$0\.0018/); // 9 Spark calls × $0.0002

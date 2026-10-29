@@ -5,6 +5,7 @@ import { api, subscribeTrace } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { AgentTrace } from "../components/AgentTrace";
 import { AskBackCard } from "../components/AskBackCard";
+import { VisitSummaryCard } from "../components/VisitSummaryCard";
 import { ProgressBar } from "../components/BoqTable";
 import { ErrorNote, InferredBadge, StatusBadge } from "../components/Layout";
 
@@ -84,6 +85,7 @@ export function VisitPage() {
         </div>
       </div>
       <ErrorNote error={actionError} />
+      {visit.assessments.length > 0 && visit.status !== "queued" && visit.status !== "processing" && <VisitSummaryCard visitId={visitId} summary={visit.summary} />}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <AgentTrace steps={steps} costUsd={costUsd} status={liveStatus ?? visit.status} itemCode={itemCode} />

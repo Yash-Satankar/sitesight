@@ -2,6 +2,7 @@ import { z } from "zod";
 import { BoqItem, BoqItemInput } from "./boq.js";
 import { Assessment, AskBack } from "./assessment.js";
 import { VisitStatus } from "./agent.js";
+import { ProgressRow } from "../progress.js";
 
 // ---- Projects & zones ----
 export const CreateProjectBody = z.object({
@@ -105,11 +106,28 @@ export type Photo = z.infer<typeof Photo>;
 export const EarlierAskBack = AskBack.extend({ visitDate: z.string() });
 export type EarlierAskBack = z.infer<typeof EarlierAskBack>;
 
+/** Item counts for the visit summary card, and progress since the previous assessed visit. */
+export const VisitProgress = z.object({
+  totalItems: z.number().int(),
+  /** Items with an observed assessment in this visit. */
+  assessed: z.number().int(),
+  /** Items assessed by inference only (not billed). */
+  inferred: z.number().int(),
+  /** Items without an assessment that have an open photo request (any visit of the project). */
+  awaitingPhoto: z.number().int(),
+  notAssessed: z.number().int(),
+  previousVisit: z.object({ id: z.number().int(), visitDate: z.string() }).nullable(),
+  /** Per-item comparison with previousVisit; empty when there is none. */
+  sinceLastVisit: z.array(ProgressRow),
+});
+export type VisitProgress = z.infer<typeof VisitProgress>;
+
 export const VisitDetail = VisitSummary.extend({
   photos: z.array(Photo),
   assessments: z.array(Assessment),
   askBacks: z.array(AskBack),
   earlierOpenAskBacks: z.array(EarlierAskBack),
+  summary: VisitProgress,
 });
 export type VisitDetail = z.infer<typeof VisitDetail>;
 

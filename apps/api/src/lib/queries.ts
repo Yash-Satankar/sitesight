@@ -3,6 +3,7 @@ import type { Assessment, AskBack, EarlierAskBack, Photo, VisitDetail, VisitSumm
 import { db, schema } from "../db/client.js";
 import { presignGet } from "../services/storage.js";
 import { notFound } from "./http.js";
+import { loadVisitProgress } from "./visit-progress.js";
 
 type VisitRow = typeof schema.visits.$inferSelect;
 
@@ -40,6 +41,7 @@ export async function loadAssessments(visitId: number): Promise<Assessment[]> {
     status: a.status,
     engineerNote: a.engineerNote,
     basis: a.basis,
+    stageReached: a.stageReached,
     evidence: ev.filter((e) => e.assessmentId === a.id).map((e) => ({ photoId: e.photoId, segmentIds: e.segmentIds })),
     panels: panels.filter((p) => a.panelMeasurementIds.includes(p.id)),
   }));
@@ -90,7 +92,9 @@ export async function loadVisitDetail(visitId: number): Promise<VisitDetail> {
     status: a.status,
     visitDate,
   }));
-  return { ...toVisitSummary(visit), photos, assessments: await loadAssessments(visitId), askBacks, earlierOpenAskBacks };
+  const assessments = await loadAssessments(visitId);
+  const summary = await loadVisitProgress(visit, assessments, [...askBacks, ...earlierOpenAskBacks].filter((a) => a.status === "open"));
+  return { ...toVisitSummary(visit), photos, assessments, askBacks, earlierOpenAskBacks, summary };
 }
 
 export async function countOpenAskBacks(visitId: number): Promise<number> {

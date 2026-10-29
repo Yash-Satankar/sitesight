@@ -200,40 +200,7 @@ export function parseBoqJson(text: string): BoqJson {
 
 // ---- progress between visits ----
 
-export interface ProgressInput {
-  code: string;
-  description: string;
-  status: string;
-  assessment: { percentComplete: number; stageReached: string | null } | null;
-}
-export interface ProgressRow {
-  code: string;
-  description: string;
-  previous: string;
-  now: string;
-  change: string;
-}
-
-/** Compare each BOQ item between two visits (same item order as `now`). */
-export function progressRows(previous: ProgressInput[], now: ProgressInput[]): ProgressRow[] {
-  const cell = (x: ProgressInput | undefined) =>
-    !x ? "—" : x.assessment ? `${round1(x.assessment.percentComplete)}%${x.assessment.stageReached ? ` (${x.assessment.stageReached})` : ""}` : x.status;
-  return now.map((n) => {
-    const p = previous.find((x) => x.code === n.code);
-    let change: string;
-    if (p?.assessment && n.assessment) {
-      const d = round1(n.assessment.percentComplete - p.assessment.percentComplete);
-      change = d > 0.5 ? `+${d} pts` : d < -0.5 ? `${d} pts, went backwards (deviation)` : "no change";
-    } else if (n.assessment) change = "new";
-    else if (p?.assessment) change = "not assessed this visit";
-    else change = "—";
-    return { code: n.code, description: n.description, previous: cell(p), now: cell(n), change };
-  });
-}
-
-function round1(n: number) {
-  return Math.round(n * 10) / 10;
-}
+export { progressRows, type ProgressInput, type ProgressRow } from "@sitesight/shared";
 
 // ---- console formatting ----
 
