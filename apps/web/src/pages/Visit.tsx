@@ -6,7 +6,7 @@ import { useAsync } from "../lib/useAsync";
 import { AgentTrace } from "../components/AgentTrace";
 import { AskBackCard } from "../components/AskBackCard";
 import { ProgressBar } from "../components/BoqTable";
-import { ErrorNote, StatusBadge } from "../components/Layout";
+import { ErrorNote, InferredBadge, StatusBadge } from "../components/Layout";
 
 /** Left: live agent trace. Right: assessments as they land, plus ask-back cards. */
 export function VisitPage() {
@@ -105,6 +105,7 @@ export function VisitPage() {
                       <span className="font-mono text-xs">{item?.code}</span>
                       <span className="flex-1 truncate">{item?.description}</span>
                       <StatusBadge status={a.status} />
+                      <InferredBadge basis={a.basis} />
                     </div>
                     <ProgressBar pct={a.percentComplete} />
                     <p className="text-xs text-gray-500">

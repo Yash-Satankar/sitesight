@@ -46,6 +46,7 @@ export interface VisitResult {
   items: { code: string; description: string; status: string; openAskBackIds: number[] }[];
   assessments: {
     code: string;
+    basis: "observed" | "inferred";
     percentComplete: number;
     stageReached: string | null;
     qtyDone: number | null;
@@ -204,7 +205,7 @@ async function runVisit(
   out(
     formatTable(
       ["BOQ item", "status", "% done", "qty_done", "conf.", "evidence", "rationale"],
-      [30, 28, 6, 12, 5, 9, 50],
+      [30, 40, 6, 12, 5, 9, 46],
       items.map((it) => {
         const a = result.assessments.find((x) => x.code === it.code);
         const status = result.items.find((x) => x.code === it.code)!.status;
@@ -287,6 +288,13 @@ async function collect(index: number, dir: string, visitId: number, outcome: Vis
   const [visit] = await db.select().from(schema.visits).where(eq(schema.visits.id, visitId));
   const items = await db.select().from(schema.boqItems).where(eq(schema.boqItems.projectId, visit!.projectId)).orderBy(schema.boqItems.id);
   const codeOf = new Map(items.map((i) => [i.id, i.code]));
+  // Open requests from any visit of the project count: an item can still be waiting on an earlier visit's ask-back.
+  const openProjectAskBacks = await db
+    .select({ id: schema.askBacks.id, boqItemId: schema.askBacks.boqItemId })
+    .from(schema.askBacks)
+    .innerJoin(schema.visits, eq(schema.visits.id, schema.askBacks.visitId))
+    .where(and(eq(schema.visits.projectId, visit!.projectId), eq(schema.askBacks.status, "open")))
+    .orderBy(schema.askBacks.id);
 
   return {
     index,
@@ -295,16 +303,18 @@ async function collect(index: number, dir: string, visitId: number, outcome: Vis
     error,
     visitId,
     items: items.map((it) => {
-      const openIds = askBacks.filter(({ ab }) => ab.boqItemId === it.id && ab.status === "open").map(({ ab }) => ab.id);
+      const openIds = openProjectAskBacks.filter((ab) => ab.boqItemId === it.id).map((ab) => ab.id);
+      const assessment = rows.find((r) => r.a.boqItemId === it.id)?.a;
       return {
         code: it.code,
         description: it.description,
-        status: boqItemStatus(rows.some((r) => r.a.boqItemId === it.id), openIds),
+        status: boqItemStatus(!!assessment, openIds, assessment?.basis),
         openAskBackIds: openIds,
       };
     }),
     assessments: rows.map(({ a, code }) => ({
       code,
+      basis: a.basis,
       percentComplete: a.percentComplete,
       stageReached: a.stageReached,
       qtyDone: a.qtyDone,

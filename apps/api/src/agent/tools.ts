@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, ne, or } from "drizzle-orm";
 import type { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import sharp from "sharp";
@@ -7,6 +7,7 @@ import {
   stagePercent,
   ToolArgs,
   TOOL_NAMES,
+  INFERRED_STATUS,
   type AgentStepKind,
   type PanelSpecArg,
   type RejectionPayload,
@@ -46,6 +47,9 @@ export interface ToolOutcome {
 
 /** Max long edge of overlay images (masks / panel) sent to the model. */
 export const OVERLAY_MAX_EDGE_PX = 1280;
+
+/** Inferred assessments (hidden earlier-sequence work) are capped at this confidence. */
+export const INFERRED_MAX_CONFIDENCE = 0.5;
 
 /** Area items assessed by eye (no panel measurement) are capped at this confidence. */
 export const UNMEASURED_AREA_MAX_CONFIDENCE = 0.5;
@@ -466,6 +470,45 @@ const handlers: Handlers = {
     };
     if (item.measureMode === "visual_only") capConfidence(env.VISUAL_ONLY_MAX_CONFIDENCE, "for visual_only items");
 
+    // Inferred = hidden earlier-sequence work deduced from a later item observed in this visit. Never billable as-is.
+    if (args.basis === "inferred") {
+      if (args.panel_measurement_ids?.length || args.panel_measurement_id != null) {
+        return { output: { error: "An inferred assessment cannot cite panel measurements: a measurement is an observation. Use basis \"observed\"." } };
+      }
+      if (item.sequenceNo == null) {
+        return { output: { error: `${item.code} has no sequence number, so it cannot be inferred from later work. Assess it from photos, ask for a photo, or leave it unassessed.` } };
+      }
+      const observedLater = await db
+        .select({ code: schema.boqItems.code })
+        .from(schema.assessments)
+        .innerJoin(schema.boqItems, eq(schema.boqItems.id, schema.assessments.boqItemId))
+        .where(
+          and(
+            eq(schema.assessments.visitId, ctx.visitId),
+            eq(schema.assessments.basis, "observed"),
+            ne(schema.assessments.boqItemId, item.id),
+            gt(schema.boqItems.sequenceNo, item.sequenceNo),
+          ),
+        );
+      if (!observedLater.length) {
+        return {
+          output: {
+            error: `basis "inferred" is only allowed when an item later in the sequence (sequence_no > ${item.sequenceNo}) has been recorded as observed in this visit, and none has. Record the observed item first, ask for a photo of ${item.code}, or leave it unassessed.`,
+          },
+        };
+      }
+      const rationale = args.rationale.toLowerCase();
+      if (!observedLater.some((o) => rationale.includes(o.code.toLowerCase()))) {
+        return {
+          output: {
+            error: `The rationale of an inferred assessment must name the observed item it is inferred from: one of ${observedLater.map((o) => o.code).join(", ")}.`,
+          },
+        };
+      }
+      capConfidence(INFERRED_MAX_CONFIDENCE, "for inferred assessments");
+      notes.push(`Recorded as ${INFERRED_STATUS}.`);
+    }
+
     // Percent: staged items name the latest completed stage and code converts it; others give percent_complete.
     let percent: number;
     let stageReached: string | null = null;
@@ -573,6 +616,7 @@ const handlers: Handlers = {
       rationale: args.rationale,
       deviation,
       stageReached,
+      basis: args.basis,
       status: "proposed" as const,
     };
     const assessmentId = await db.transaction(async (tx) => {
@@ -603,6 +647,7 @@ const handlers: Handlers = {
         assessment_id: assessmentId,
         percent_complete: percent,
         ...(stageReached ? { stage_reached: stageReached } : {}),
+        basis: args.basis,
         confidence,
         qty_done: qtyDone,
         ...(qtyBasis ? { qty_basis: qtyBasis } : {}),
@@ -627,6 +672,40 @@ const handlers: Handlers = {
       .from(schema.zones)
       .where(and(eq(schema.zones.id, args.zone_id), eq(schema.zones.projectId, ctx.projectId)));
     if (!zone) return { output: { error: `zone_id ${args.zone_id} not found` } };
+    if (args.boq_item_id != null) {
+      const [item] = await db
+        .select({ id: schema.boqItems.id })
+        .from(schema.boqItems)
+        .where(and(eq(schema.boqItems.id, args.boq_item_id), eq(schema.boqItems.projectId, ctx.projectId)));
+      if (!item) return { output: { error: `boq_item_id ${args.boq_item_id} not found in this project` } };
+
+      // One open request per item across the whole project: reuse it instead of asking the engineer twice.
+      const [existing] = await db
+        .select({ ab: schema.askBacks, visitDate: schema.visits.visitDate })
+        .from(schema.askBacks)
+        .innerJoin(schema.visits, eq(schema.visits.id, schema.askBacks.visitId))
+        .where(
+          and(
+            eq(schema.visits.projectId, ctx.projectId),
+            eq(schema.askBacks.boqItemId, args.boq_item_id),
+            eq(schema.askBacks.status, "open"),
+          ),
+        )
+        .orderBy(schema.askBacks.id)
+        .limit(1);
+      if (existing) {
+        const where = existing.ab.visitId === ctx.visitId ? "earlier in this visit" : `on the visit of ${existing.visitDate}`;
+        return {
+          output: {
+            ask_back_id: existing.ab.id,
+            status: "open",
+            reused: true,
+            instruction: existing.ab.instruction,
+            note: `A photo request for this item is already open (ask-back #${existing.ab.id}, made ${where}); no new request was created.`,
+          },
+        };
+      }
+    }
     const [ab] = await db
       .insert(schema.askBacks)
       .values({

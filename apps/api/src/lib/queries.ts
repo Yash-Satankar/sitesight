@@ -32,6 +32,7 @@ export async function loadAssessments(visitId: number): Promise<Assessment[]> {
     deviation: a.deviation,
     status: a.status,
     engineerNote: a.engineerNote,
+    basis: a.basis,
     evidence: ev.filter((e) => e.assessmentId === a.id).map((e) => ({ photoId: e.photoId, segmentIds: e.segmentIds })),
   }));
 }

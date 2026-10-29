@@ -4,7 +4,7 @@ import type { Assessment, BoqItem, Photo } from "@sitesight/shared";
 import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { PhotoWithMasks } from "../components/PhotoWithMasks";
-import { ErrorNote, StatusBadge } from "../components/Layout";
+import { ErrorNote, InferredBadge, StatusBadge } from "../components/Layout";
 
 export function ReviewPage() {
   const visitId = Number(useParams().visitId);
@@ -89,6 +89,7 @@ function ReviewCard({
           <span className="font-mono text-xs">{item?.code}</span>
           <h3 className="flex-1 font-medium">{item?.description}</h3>
           <StatusBadge status={a.status} />
+          <InferredBadge basis={a.basis} />
         </div>
         <p>
           <strong className="text-2xl">{Math.round(a.percentComplete)}%</strong>

@@ -1,6 +1,6 @@
 import { env } from "../config.js";
 import { REJECT_EXAMPLES, SEGMENT_TARGETS } from "./concepts.js";
-import { MAX_PANEL_PREVIEWS, UNMEASURED_AREA_MAX_CONFIDENCE } from "./tools.js";
+import { INFERRED_MAX_CONFIDENCE, MAX_PANEL_PREVIEWS, UNMEASURED_AREA_MAX_CONFIDENCE } from "./tools.js";
 
 const TARGET_LIST = Object.entries(SEGMENT_TARGETS)
   .map(([name, t]) => `"${name}" (${t.description}, for ${t.measureMode} items)`)
@@ -57,6 +57,12 @@ Rules:
   phone, e.g. "square-on photo of the whole bay between columns C3 and C4, including the beam above and the plinth
   below". Never ask for tapes, A4 sheets or measuring tools. Pass the boq_item_id the photo is for.
   Do not request the same photo twice; if an earlier ask-back was skipped, assess with what you have.
+- Evidence basis: prefer observed evidence (basis "observed", the default: the work is visible in this visit's photos).
+  Use basis "inferred" only for hidden earlier-sequence work, e.g. footings or plinth work buried under a cast plinth
+  beam: record the later item as observed first, then the earlier item as inferred, naming the observed item (its code)
+  in the rationale. Inferred work is capped at confidence ${INFERRED_MAX_CONFIDENCE} and is not billable until observed.
+- Open photo requests from earlier visits are listed in the context (open_ask_backs_from_earlier_visits). Do not ask
+  for the same item again; request_photo returns the existing open request for an item instead of a new one.
 - Record one assessment per BOQ item with record_assessment. percent_complete is 0–100 and never above 100.
   Report a deviation when the evidence shows work out of sequence, a material mismatch, or work not per the BOQ description.
 - Never invent BOQ items, photo ids or segment ids. Only use ids returned by the tools.

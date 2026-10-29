@@ -182,6 +182,8 @@ export const assessments = pgTable(
       .default("proposed"),
     engineerNote: text("engineer_note"),
     stageReached: text("stage_reached"), // staged items: latest completed stage named by the agent
+    // observed in this visit's photos, or inferred (hidden earlier-sequence work; not billable until observed)
+    basis: text("basis", { enum: ["observed", "inferred"] }).notNull().default("observed"),
   },
   (t) => [uniqueIndex("assessments_visit_item_uq").on(t.visitId, t.boqItemId)],
 );

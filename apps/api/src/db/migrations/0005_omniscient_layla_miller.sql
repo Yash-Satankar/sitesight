@@ -1,0 +1,1 @@
+ALTER TABLE "assessments" ADD COLUMN "basis" text DEFAULT 'observed' NOT NULL;

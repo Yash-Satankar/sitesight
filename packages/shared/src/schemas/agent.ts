@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SegmentTarget } from "./targets.js";
+import { EvidenceBasis } from "./assessment.js";
 
 /** Visit state machine — see DESIGN.md §5. */
 export const VisitStatus = z.enum([
@@ -131,6 +132,9 @@ export const ToolArgs = {
   record_assessment: z.object({
     boq_item_id: z.number().int(),
     percent_complete: z.number().min(0).max(100).optional().describe("Required for items without stages."),
+    basis: EvidenceBasis.default("observed").describe(
+      "observed (default): visible in this visit's photos. inferred: hidden earlier-sequence work deduced from an item observed in this visit; name that item in the rationale. Not billable until observed.",
+    ),
     stage_reached: z
       .string()
       .optional()

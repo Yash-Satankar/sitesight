@@ -4,7 +4,7 @@ import { CreateVisitBody } from "@sitesight/shared";
 import { db, schema } from "../db/client.js";
 import { HttpError, intParam, notFound, parse } from "../lib/http.js";
 import { countOpenAskBacks, getVisitOr404, loadVisitDetail, toVisitSummary } from "../lib/queries.js";
-import { enqueue } from "../services/jobs.js";
+import { queueAgentRun } from "../services/jobs.js";
 
 export const visitsRouter = Router();
 
@@ -36,7 +36,3 @@ visitsRouter.post("/visits/:id/run", async (req, res) => {
   res.status(202).json({ status: "queued" });
 });
 
-export async function queueAgentRun(visitId: number) {
-  await db.update(schema.visits).set({ status: "queued" }).where(eq(schema.visits.id, visitId));
-  await enqueue("agent_run", { visitId });
-}

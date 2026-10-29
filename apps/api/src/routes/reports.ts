@@ -58,6 +58,7 @@ reportsRouter.post("/visits/:id/report", async (req, res) => {
       rationale: a.rationale,
       status: a.status,
       engineerNote: a.engineerNote,
+      basis: a.basis,
       evidence,
     });
   }

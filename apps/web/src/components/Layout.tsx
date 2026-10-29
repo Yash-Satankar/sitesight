@@ -43,3 +43,13 @@ export function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
+
+/** Shown on inferred assessments: hidden earlier-sequence work, not billable until observed. */
+export function InferredBadge({ basis }: { basis: string }) {
+  if (basis !== "inferred") return null;
+  return (
+    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900" title="Deduced from later work seen in this visit">
+      inferred — not billable until observed
+    </span>
+  );
+}

@@ -1,4 +1,4 @@
-import { sql as dsql } from "drizzle-orm";
+import { eq, sql as dsql } from "drizzle-orm";
 import { db, schema } from "../db/client.js";
 
 export type JobKind = (typeof schema.jobs.$inferSelect)["kind"];
@@ -42,4 +42,10 @@ export async function releaseStale(minutes = 10): Promise<void> {
     UPDATE jobs SET status = 'pending', locked_at = NULL
     WHERE status = 'running' AND locked_at < now() - make_interval(mins => ${minutes})
   `);
+}
+
+/** Mark a visit queued and enqueue an agent run for it. */
+export async function queueAgentRun(visitId: number): Promise<void> {
+  await db.update(schema.visits).set({ status: "queued" }).where(eq(schema.visits.id, visitId));
+  await enqueue("agent_run", { visitId });
 }

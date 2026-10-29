@@ -1,11 +1,14 @@
+import { INFERRED_STATUS, type EvidenceBasis } from "@sitesight/shared";
+
 /**
  * One line of status for a BOQ item after an agent run, shared by the dry-run table, its JSON report and the PDF.
  * An item without an assessment but with an open photo request is "awaiting photo (ask-back #N)".
  */
-export function boqItemStatus(assessed: boolean, openAskBackIds: number[]): string {
+export function boqItemStatus(assessed: boolean, openAskBackIds: number[], basis: EvidenceBasis = "observed"): string {
   const refs = openAskBackIds.length ? `ask-back ${openAskBackIds.map((id) => `#${id}`).join(", ")}` : null;
   if (!assessed) return refs ? `awaiting photo (${refs})` : "not assessed";
-  return refs ? `assessed (${refs} open)` : "assessed";
+  const base = basis === "inferred" ? INFERRED_STATUS : "assessed";
+  return refs ? `${base} (${refs} open)` : base;
 }
 
 export interface PendingItem {

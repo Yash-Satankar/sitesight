@@ -199,6 +199,13 @@ async function buildContext(visitId: number): Promise<string> {
     .orderBy(desc(schema.visits.visitDate), desc(schema.visits.id));
   const latestByItem = new Map<number, (typeof accepted)[number]>();
   for (const row of accepted) if (!latestByItem.has(row.a.boqItemId)) latestByItem.set(row.a.boqItemId, row);
+  // Photo requests still open from earlier visits: not to be asked again; a photo here may answer them.
+  const earlierOpen = await db
+    .select({ ab: schema.askBacks, visitDate: schema.visits.visitDate })
+    .from(schema.askBacks)
+    .innerJoin(schema.visits, eq(schema.visits.id, schema.askBacks.visitId))
+    .where(and(eq(schema.visits.projectId, projectId), ne(schema.askBacks.visitId, visitId), eq(schema.askBacks.status, "open")))
+    .orderBy(schema.askBacks.id);
 
   const ctx = {
     project: { name: project!.name, location: project!.locationLabel },
@@ -216,6 +223,14 @@ async function buildContext(visitId: number): Promise<string> {
       percent_complete: a.percentComplete,
       confidence: a.confidence,
       rationale: a.rationale,
+    })),
+    open_ask_backs_from_earlier_visits: earlierOpen.map(({ ab, visitDate }) => ({
+      ask_back_id: ab.id,
+      visit_date: visitDate,
+      boq_item_id: ab.boqItemId,
+      zone_id: ab.zoneId,
+      instruction: ab.instruction,
+      reason: ab.reason,
     })),
     previous_visit_assessments: [...latestByItem.values()].map(({ a, visitDate }) => ({
       boq_item_id: a.boqItemId,

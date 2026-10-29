@@ -143,7 +143,8 @@ assessments   (id, visit_id, boq_item_id,
                deviation TEXT NULL,
                status,               -- 'proposed' | 'accepted' | 'edited'
                engineer_note TEXT NULL,
-               stage_reached TEXT NULL) -- staged items: latest completed stage
+               stage_reached TEXT NULL, -- staged items: latest completed stage
+               basis)                -- 'observed' | 'inferred' (hidden earlier-sequence work; not billable until observed)
 
 assessment_evidence (assessment_id, photo_id, segment_ids INT[])
 
@@ -290,6 +291,8 @@ SAM also finds things that look like the target: scaffolding poles, trees, steel
 - **visual_only** items (rebar, slab, plaster, openings, …): Spark judges stage from the image (e.g. "shuttering done, not cast") and gives percent_complete only; code computes `qty_done = percent/100 × planned_qty` and ignores a model-supplied value. Confidence is capped at 0.7. Area items without a panel measurement get the same percent-based qty, capped at confidence 0.5. Count items keep the model's count.
 - **Staged items** (`boq_items.stages`, e.g. slab: shuttering 0.25 → reinforcement 0.35 → concreting 0.40; visual_only only, weights sum to 1, names unique, "none" reserved): the agent passes `stage_reached` = the latest COMPLETED stage (or "none") and names it with its evidence in the rationale. Code sets `percent_complete` = cumulative weight up to and including that stage and `qty_done = percent × planned_qty`; a model-supplied percent is ignored and noted. The BOQ review page shows stages read-only for now.
 - **Previous visits:** the agent context lists `previous_visit_assessments` (latest engineer-accepted assessment per item from other visits; `get_previous_assessment` also returns `stage_reached`). The rationale states what changed. If progress is lower than the previous accepted value, code records it as a deviation (`Progress went backwards: 60% (reinforcement) at the visit of …, now 25% (shuttering).`), appended to any deviation the model gave.
+- **Evidence basis:** assessments are `observed` (default: visible in this visit's photos) or `inferred`. `inferred` is only allowed for an item whose `sequence_no` is lower than an item already recorded as observed in this visit (e.g. footings under a cast plinth beam); the rationale must name that observed item, confidence is capped at 0.5, and panel measurements cannot be cited. Inferred items show as "inferred — not billable until observed" in the dry-run table/JSON, the review page and the PDF; the PDF's bill summary lists observed quantities only and puts inferred items in their own section.
+- **Ask-backs across visits:** one open request per BOQ item per project. `request_photo` for an item that already has an open ask-back (from any visit) returns that one with a note instead of creating another. Open ask-backs from earlier visits are listed in the agent's starting context (`open_ask_backs_from_earlier_visits`). A photo from any visit of the project can fulfil an ask-back: from the same visit it re-runs that visit as before; from a later visit it closes the request and, if the earlier visit was only waiting on requests, moves it to `assessed` (the new photo is assessed by the later visit).
 - **Material check:** the agent compares the visible material with the BOQ spec (clay brick vs concrete/fly-ash block vs AAC, …); on mismatch it still assesses progress but sets `deviation`.
 - **Floor scoping:** a BOQ item covers only the floor/element it names; work on other floors is not credited to it.
 - **Results:** an item with no assessment but an open ask-back reports `awaiting photo (ask-back #N)` (dry-run table and JSON, PDF "Awaiting photos" section; `lib/item-status.ts`).
@@ -319,7 +322,7 @@ POST   /visits/:id/photos                register uploaded photo (+ zone, voice 
 POST   /visits/:id/run                   enqueue agent job
 GET    /visits/:id                       visit + assessments + ask-backs
 GET    /visits/:id/trace                 SSE stream of agent_steps
-POST   /ask-backs/:id/fulfil             { photoId }  → re-enqueue when all resolved
+POST   /ask-backs/:id/fulfil             { photoId } (any visit of the project) → re-enqueue when all resolved
 POST   /ask-backs/:id/skip
 PATCH  /assessments/:id                  accept / edit
 POST   /visits/:id/report                → PDF, returns download URL

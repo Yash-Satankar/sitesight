@@ -1,6 +1,14 @@
 import { z } from "zod";
 
 export const AssessmentStatus = z.enum(["proposed", "accepted", "edited"]);
+
+/**
+ * observed: the work is visible in this visit's photos. inferred: hidden earlier-sequence work deduced from
+ * observed later work (e.g. footings under a cast plinth beam). Inferred quantities are not billable until observed.
+ */
+export const EvidenceBasis = z.enum(["observed", "inferred"]);
+export type EvidenceBasis = z.infer<typeof EvidenceBasis>;
+export const INFERRED_STATUS = "inferred — not billable until observed";
 export type AssessmentStatus = z.infer<typeof AssessmentStatus>;
 
 export const Evidence = z.object({
@@ -20,6 +28,7 @@ export const Assessment = z.object({
   deviation: z.string().nullable(),
   status: AssessmentStatus,
   engineerNote: z.string().nullable(),
+  basis: EvidenceBasis,
   evidence: z.array(Evidence),
 });
 export type Assessment = z.infer<typeof Assessment>;
