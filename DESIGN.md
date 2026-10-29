@@ -113,11 +113,12 @@ projects      (id, name, location_label, created_at)
 zones         (id, project_id, name, sort_order)
 
 boq_items     (id, project_id, zone_id NULL, code, description,
-               unit,                 -- 'nos' | 'm2' | 'm3' | 'rmt' | 'kg'
+               unit,                 -- 'nos' | 'm2' | 'm3' | 'rmt' | 'kg' | 'lot'
                planned_qty NUMERIC,
                measure_mode,         -- 'count' | 'area' | 'visual_only'
                segment_targets TEXT[], -- {'column'} | {'brickwork'} | {} (visual_only), see §7
                panel_planned_qty NUMERIC NULL, -- area items: planned qty in one photographed panel
+               stages JSONB NULL,    -- visual_only items: [{name, weight}], weights sum to 1
                sequence_no INT NULL) -- for out-of-order detection (stretch)
 
 visits        (id, project_id, visit_date,
@@ -141,7 +142,8 @@ assessments   (id, visit_id, boq_item_id,
                rationale TEXT,
                deviation TEXT NULL,
                status,               -- 'proposed' | 'accepted' | 'edited'
-               engineer_note TEXT NULL)
+               engineer_note TEXT NULL,
+               stage_reached TEXT NULL) -- staged items: latest completed stage
 
 assessment_evidence (assessment_id, photo_id, segment_ids INT[])
 
@@ -286,6 +288,8 @@ SAM also finds things that look like the target: scaffolding poles, trees, steel
   - Limitation: the fraction is in image space, so a panel seen at a steep angle over- or under-weights near/far parts. Ask for a square-on photo when that matters.
 - **area** items, **reference mode (optional)**: segment a reference object (A4 sheet = 0.0624 m², 1 m tape, brick) → px²→m² ratio → apply to verified `brickwork` masks. Ignores perspective, so `scale_confidence` drops if the reference is far from the target or heavily skewed. Only useful when a reference is clearly in shot.
 - **visual_only** items (rebar, slab, plaster, openings, …): Spark judges stage from the image (e.g. "shuttering done, not cast") and gives percent_complete only; code computes `qty_done = percent/100 × planned_qty` and ignores a model-supplied value. Confidence is capped at 0.7. Area items without a panel measurement get the same percent-based qty, capped at confidence 0.5. Count items keep the model's count.
+- **Staged items** (`boq_items.stages`, e.g. slab: shuttering 0.25 → reinforcement 0.35 → concreting 0.40; visual_only only, weights sum to 1, names unique, "none" reserved): the agent passes `stage_reached` = the latest COMPLETED stage (or "none") and names it with its evidence in the rationale. Code sets `percent_complete` = cumulative weight up to and including that stage and `qty_done = percent × planned_qty`; a model-supplied percent is ignored and noted. The BOQ review page shows stages read-only for now.
+- **Previous visits:** the agent context lists `previous_visit_assessments` (latest engineer-accepted assessment per item from other visits; `get_previous_assessment` also returns `stage_reached`). The rationale states what changed. If progress is lower than the previous accepted value, code records it as a deviation (`Progress went backwards: 60% (reinforcement) at the visit of …, now 25% (shuttering).`), appended to any deviation the model gave.
 - **Material check:** the agent compares the visible material with the BOQ spec (clay brick vs concrete/fly-ash block vs AAC, …); on mismatch it still assesses progress but sets `deviation`.
 - **Floor scoping:** a BOQ item covers only the floor/element it names; work on other floors is not credited to it.
 - **Results:** an item with no assessment but an open ask-back reports `awaiting photo (ask-back #N)` (dry-run table and JSON, PDF "Awaiting photos" section; `lib/item-status.ts`).

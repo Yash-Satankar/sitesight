@@ -6,17 +6,20 @@ import { parseArgs } from "node:util";
 import { BoqItemInput } from "@sitesight/shared";
 import { z } from "zod";
 
-export const DRY_RUN_USAGE = `usage: pnpm agent-dry-run --photos <dir> --boq <file.json|file.xlsx>
+export const DRY_RUN_USAGE = `usage: pnpm agent-dry-run (--photos <dir> | --visits <dir1,dir2,…>) --boq <file.json|file.xlsx>
 
-  --photos   folder of site photos. Each subfolder with photos becomes a zone; photos directly in
-             the folder go into one zone named after it. Optional transcript: <photo>.txt next to it.
-  --boq      BOQ as JSON (see samples/boq-demo.json) or .xlsx (parsed by Muse Spark first).
+  --photos   folder of site photos for one visit. Each subfolder with photos becomes a zone; photos
+             directly in the folder go into one zone. Optional transcript: <photo>.txt next to it.
+  --visits   comma-separated visit folders, run in order on the same project. Before each visit the
+             previous visit's assessments are accepted (as an engineer would), so the agent sees them.
+  --boq      BOQ as JSON (see samples/boq-demo.json, samples/boq-demo-residence.json) or .xlsx (parsed by Muse Spark).
+             A JSON BOQ may declare "zones"; loose photos then go into its single zone.
 
 Runs the real agent loop against Meta with an in-memory database (no Docker, API, worker or R2).
-Spend is capped by MAX_COST_PER_VISIT_USD. Output and stored masks go to samples/out/dry-run-<time>/.`;
+Spend is capped per visit by MAX_COST_PER_VISIT_USD. Output and masks go to samples/out/dry-run-<time>/.`;
 
 export interface DryRunArgs {
-  photos: string;
+  visits: string[];
   boq: string;
   help: boolean;
 }
@@ -27,13 +30,20 @@ export function parseDryRunArgs(argv: string[]): DryRunArgs {
     args,
     allowPositionals: true,
     strict: true,
-    options: { photos: { type: "string" }, boq: { type: "string" }, help: { type: "boolean", short: "h" } },
+    options: {
+      photos: { type: "string" },
+      visits: { type: "string" },
+      boq: { type: "string" },
+      help: { type: "boolean", short: "h" },
+    },
   });
-  if (values.help) return { photos: "", boq: "", help: true };
+  if (values.help) return { visits: [], boq: "", help: true };
   if (positionals.length) throw new Error(`Unexpected arguments: ${positionals.join(" ")}`);
-  if (!values.photos) throw new Error("--photos <dir> is required");
+  if (values.photos && values.visits) throw new Error("Use either --photos (one visit) or --visits (several), not both.");
+  const visits = values.photos ? [values.photos] : (values.visits ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+  if (!visits.length) throw new Error("--photos <dir> or --visits <dir1,dir2,…> is required");
   if (!values.boq) throw new Error("--boq <file.json|file.xlsx> is required");
-  return { photos: values.photos, boq: values.boq, help: false };
+  return { visits, boq: values.boq, help: false };
 }
 
 // ---- photos → zones ----
@@ -50,18 +60,44 @@ export interface DiscoveredZone {
   photos: DiscoveredPhoto[];
 }
 
+export interface DiscoverOptions {
+  /** Zones declared by the BOQ: subfolders must use these names; loose photos go to the only one. */
+  declaredZones?: string[] | null;
+  /** Zone name for loose photos when no zones are declared (default: the folder name). */
+  looseZoneName?: string;
+}
+
 /** One zone per subfolder that contains photos, plus one for photos directly in `dir`. */
-export async function discoverZones(dir: string): Promise<DiscoveredZone[]> {
+export async function discoverZones(dir: string, opts: DiscoverOptions = {}): Promise<DiscoveredZone[]> {
   const entries = await readdir(dir, { withFileTypes: true });
   const zones: DiscoveredZone[] = [];
   const rootPhotos = await photosIn(dir, entries.filter((e) => e.isFile()).map((e) => e.name));
   const subdirs = entries.filter((e) => e.isDirectory() && e.name !== "out" && !e.name.startsWith(".")).map((e) => e.name);
+  const declared = opts.declaredZones?.length ? opts.declaredZones : null;
 
   for (const sub of subdirs.sort(naturalCompare)) {
     const photos = await photosIn(join(dir, sub), await readdir(join(dir, sub)));
-    if (photos.length) zones.push({ name: sub, photos });
+    if (!photos.length) continue;
+    if (declared && !declared.includes(sub)) {
+      throw new Error(`Photo folder "${sub}" in ${dir} is not a zone declared in the BOQ (${declared.join(", ")}).`);
+    }
+    zones.push({ name: sub, photos });
   }
-  if (rootPhotos.length) zones.unshift({ name: zones.length ? `${basename(dir)} (top folder)` : basename(dir), photos: rootPhotos });
+  if (rootPhotos.length) {
+    let name: string;
+    if (declared) {
+      if (declared.length !== 1) {
+        throw new Error(`Photos directly in ${dir} need a zone: put them in a subfolder named after one of ${declared.join(", ")}.`);
+      }
+      name = declared[0]!;
+    } else {
+      const base = opts.looseZoneName ?? basename(dir);
+      name = zones.length ? `${base} (top folder)` : base;
+    }
+    const existing = zones.find((z) => z.name === name);
+    if (existing) existing.photos.unshift(...rootPhotos);
+    else zones.unshift({ name, photos: rootPhotos });
+  }
   if (!zones.length) throw new Error(`No .jpg/.png/.webp photos found in ${dir} or its subfolders.`);
   return zones;
 }
@@ -100,8 +136,14 @@ export const BoqJsonItem = BoqItemInput.omit({ zoneId: true }).extend({
 });
 export type BoqJsonItem = z.infer<typeof BoqJsonItem>;
 
-/** Accepts `[...items]` or `{ "items": [...] }`. Throws one readable error listing every bad item. */
-export function parseBoqJson(text: string): BoqJsonItem[] {
+export interface BoqJson {
+  items: BoqJsonItem[];
+  /** Optional `"zones": [...]` declared in the file. */
+  zones: string[] | null;
+}
+
+/** Accepts `[...items]` or `{ "zones"?: [...], "items": [...] }`. Throws one readable error listing every bad item. */
+export function parseBoqJson(text: string): BoqJson {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -110,6 +152,9 @@ export function parseBoqJson(text: string): BoqJsonItem[] {
   }
   const list = Array.isArray(raw) ? raw : (raw as { items?: unknown })?.items;
   if (!Array.isArray(list) || !list.length) throw new Error('BOQ JSON must be an array of items or { "items": [...] }.');
+  const zonesRaw = Array.isArray(raw) ? undefined : (raw as { zones?: unknown }).zones;
+  const zones = zonesRaw === undefined ? null : z.array(z.string().trim().min(1)).min(1).safeParse(zonesRaw);
+  if (zones && !zones.success) throw new Error('BOQ "zones" must be a non-empty list of zone names.');
 
   const items: BoqJsonItem[] = [];
   const errors: string[] = [];
@@ -122,7 +167,47 @@ export function parseBoqJson(text: string): BoqJsonItem[] {
     }
   });
   if (errors.length) throw new Error(`Invalid BOQ items:\n  ${errors.join("\n  ")}`);
-  return items;
+  const declared = zones ? zones.data! : null;
+  const unknown = declared ? items.filter((i) => i.zone && !declared.includes(i.zone)).map((i) => `${i.code} → "${i.zone}"`) : [];
+  if (unknown.length) throw new Error(`BOQ items name zones not in "zones" (${declared!.join(", ")}): ${unknown.join(", ")}`);
+  return { items, zones: declared };
+}
+
+// ---- progress between visits ----
+
+export interface ProgressInput {
+  code: string;
+  description: string;
+  status: string;
+  assessment: { percentComplete: number; stageReached: string | null } | null;
+}
+export interface ProgressRow {
+  code: string;
+  description: string;
+  previous: string;
+  now: string;
+  change: string;
+}
+
+/** Compare each BOQ item between two visits (same item order as `now`). */
+export function progressRows(previous: ProgressInput[], now: ProgressInput[]): ProgressRow[] {
+  const cell = (x: ProgressInput | undefined) =>
+    !x ? "—" : x.assessment ? `${round1(x.assessment.percentComplete)}%${x.assessment.stageReached ? ` (${x.assessment.stageReached})` : ""}` : x.status;
+  return now.map((n) => {
+    const p = previous.find((x) => x.code === n.code);
+    let change: string;
+    if (p?.assessment && n.assessment) {
+      const d = round1(n.assessment.percentComplete - p.assessment.percentComplete);
+      change = d > 0.5 ? `+${d} pts` : d < -0.5 ? `${d} pts, went backwards (deviation)` : "no change";
+    } else if (n.assessment) change = "new";
+    else if (p?.assessment) change = "not assessed this visit";
+    else change = "—";
+    return { code: n.code, description: n.description, previous: cell(p), now: cell(n), change };
+  });
+}
+
+function round1(n: number) {
+  return Math.round(n * 10) / 10;
 }
 
 // ---- console formatting ----

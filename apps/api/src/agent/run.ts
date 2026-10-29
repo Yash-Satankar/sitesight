@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { env } from "../config.js";
 import { db, schema } from "../db/client.js";
 import { functionCallOutput, functionCalls, outputAsInput, respond, type SparkInputItem } from "../meta/spark.js";
@@ -184,6 +184,21 @@ async function buildContext(visitId: number): Promise<string> {
     .select()
     .from(schema.askBacks)
     .where(and(eq(schema.askBacks.visitId, visitId), inArray(schema.askBacks.status, ["fulfilled", "skipped"])));
+  // Latest engineer-accepted assessment per item from earlier visits, so changes can be stated without extra tool calls.
+  const accepted = await db
+    .select({ a: schema.assessments, visitDate: schema.visits.visitDate, visitId: schema.visits.id })
+    .from(schema.assessments)
+    .innerJoin(schema.visits, eq(schema.visits.id, schema.assessments.visitId))
+    .where(
+      and(
+        eq(schema.visits.projectId, projectId),
+        ne(schema.assessments.visitId, visitId),
+        inArray(schema.assessments.status, ["accepted", "edited"]),
+      ),
+    )
+    .orderBy(desc(schema.visits.visitDate), desc(schema.visits.id));
+  const latestByItem = new Map<number, (typeof accepted)[number]>();
+  for (const row of accepted) if (!latestByItem.has(row.a.boqItemId)) latestByItem.set(row.a.boqItemId, row);
 
   const ctx = {
     project: { name: project!.name, location: project!.locationLabel },
@@ -200,6 +215,14 @@ async function buildContext(visitId: number): Promise<string> {
       boq_item_id: a.boqItemId,
       percent_complete: a.percentComplete,
       confidence: a.confidence,
+      rationale: a.rationale,
+    })),
+    previous_visit_assessments: [...latestByItem.values()].map(({ a, visitDate }) => ({
+      boq_item_id: a.boqItemId,
+      visit_date: visitDate,
+      percent_complete: a.percentComplete,
+      stage_reached: a.stageReached,
+      qty_done: a.qtyDone,
       rationale: a.rationale,
     })),
     resolved_ask_backs: askBacks.map((a) => ({

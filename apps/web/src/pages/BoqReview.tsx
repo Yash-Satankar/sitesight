@@ -7,8 +7,8 @@ import { ErrorNote } from "../components/Layout";
 // Only columns (count) and brickwork (area) can be measured from photos; the API rejects other combinations.
 const MEASURED_AS = {
   visual_only: { label: "Visual check only", patch: { measureMode: "visual_only", segmentTargets: [], panelPlannedQty: null } },
-  column: { label: "Count columns", patch: { measureMode: "count", segmentTargets: ["column"], panelPlannedQty: null } },
-  brickwork: { label: "Area of brickwork", patch: { measureMode: "area", segmentTargets: ["brickwork"] } },
+  column: { label: "Count columns", patch: { measureMode: "count", segmentTargets: ["column"], panelPlannedQty: null, stages: null } },
+  brickwork: { label: "Area of brickwork", patch: { measureMode: "area", segmentTargets: ["brickwork"], stages: null } },
 } satisfies Record<string, { label: string; patch: Pick<BoqItemInput, "measureMode" | "segmentTargets"> & Partial<BoqItemInput> }>;
 
 function measuredAs(it: BoqItemInput): keyof typeof MEASURED_AS {
@@ -84,6 +84,7 @@ export function BoqReviewPage() {
                 <th className="p-1">Planned qty</th>
                 <th className="p-1">Measured as</th>
                 <th className="p-1" title="Planned quantity inside one photographed panel, e.g. one brick bay between two columns">Panel qty</th>
+                <th className="p-1" title="Visual-only items built in stages; the agent names the latest completed stage">Stages</th>
               </tr>
             </thead>
             <tbody>
@@ -133,6 +134,9 @@ export function BoqReviewPage() {
                     ) : (
                       <span className="text-gray-400">—</span>
                     )}
+                  </td>
+                  <td className="p-1 text-xs text-gray-600" title="Read-only for now">
+                    {it.stages?.length ? it.stages.map((s) => `${s.name} ${Math.round(s.weight * 100)}%`).join(" → ") : "—"}
                   </td>
                 </tr>
               ))}

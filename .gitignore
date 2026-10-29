@@ -17,7 +17,8 @@ coverage/
 # SAM spike output
 apps/api/spike-out/
 
-# Samples hold real client photos until anonymised. Only the placeholder and the demo BOQ are tracked.
+# Samples hold real client photos until anonymised. Only the placeholder and the sample BOQs are tracked.
 samples/*
 !samples/.gitkeep
 !samples/boq-demo.json
+!samples/boq-demo-residence.json

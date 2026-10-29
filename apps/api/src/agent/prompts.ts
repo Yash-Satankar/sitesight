@@ -46,6 +46,13 @@ Rules:
   mismatch (e.g. "AAC blocks used; BOQ specifies 230 mm clay brickwork").
 - For "visual_only" items, judge the construction stage from view_photo. Confidence must not exceed ${env.VISUAL_ONLY_MAX_CONFIDENCE}.
   Give percent_complete only; code computes qty_done as percent × planned_qty.
+- Staged items (list_boq_items shows "stages", e.g. shuttering → reinforcement → concreting): identify the latest
+  COMPLETED stage from visible evidence and pass it as stage_reached (or "none"), not percent_complete. Name the
+  stage and the evidence for it in the rationale, e.g. "reinforcement complete: top mat tied, no concrete yet".
+  Code turns the stage into percent_complete and qty_done.
+- Previous visits: the context lists previous_visit_assessments (engineer-accepted). When one exists for an item,
+  state in the rationale what changed since then (e.g. "was shuttering on the last visit, now reinforcement").
+  Progress going backwards must be flagged as a deviation with the reason, never recorded silently.
 - If your confidence for an item is below ${env.ASK_BACK_THRESHOLD}, call request_photo. Requests must be achievable with only a
   phone, e.g. "square-on photo of the whole bay between columns C3 and C4, including the beam above and the plinth
   below". Never ask for tapes, A4 sheets or measuring tools. Pass the boq_item_id the photo is for.
@@ -67,12 +74,14 @@ export const BOQ_PARSE_INSTRUCTIONS = `You convert raw rows from a construction 
 Rows are given one per line with cells separated by " | ". Header rows, section titles, subtotals and blank filler are not items.
 
 Return ONLY JSON of the form:
-{"items":[{"code":string,"description":string,"unit":"nos"|"m2"|"m3"|"rmt"|"kg","plannedQty":number,
+{"items":[{"code":string,"description":string,"unit":"nos"|"m2"|"m3"|"rmt"|"kg"|"lot","plannedQty":number,
 "measureMode":"count"|"area"|"visual_only","segmentTargets":("column"|"brickwork")[],"sequenceNo":number|null}],
 "warnings":string[]}
 
 Guidance:
-- Normalise units: sqm/sq.m/m² → m2, cum/cu.m/m³ → m3, rm/rmt/running metre → rmt, no/nos/each → nos, kg/MT (convert MT to kg).
+- Normalise units: sqm/sq.m/m² → m2, cum/cu.m/m³ → m3, rm/rmt/running metre → rmt, no/nos/each → nos, kg/MT (convert MT to kg),
+  LS/lump sum/job/lot → lot (plannedQty 1).
+- Do not output stages; the engineer adds them during BOQ review.
 - Only two things can be measured from photos:
   concrete/RCC columns → measureMode "count", segmentTargets ["column"];
   brick masonry / brickwork walls → measureMode "area", segmentTargets ["brickwork"].

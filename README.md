@@ -54,8 +54,16 @@ Runs the real agent loop against Meta on a folder of photos, with no Docker, API
 pnpm agent-dry-run --photos samples/site-a --boq samples/boq-demo.json
 ```
 
+Several visits of the same project, in order:
+
+```sh
+pnpm agent-dry-run --visits samples/demo-residence/v1,samples/demo-residence/v2 --boq samples/boq-demo-residence.json
+```
+
+Before each visit the previous visit's assessments are accepted (as an engineer would), so the agent sees them; after each visit from the second on, a "progress since last visit" table shows previous | now | change.
+
 - Each subfolder of `--photos` becomes a zone; photos directly in the folder form one zone. A `<photo>.txt` next to a photo is used as its voice-note transcript.
-- `--boq` takes JSON (see [samples/boq-demo.json](samples/boq-demo.json)) or an `.xlsx`, which Muse Spark parses first.
+- `--boq` takes JSON (see [samples/boq-demo.json](samples/boq-demo.json), [samples/boq-demo-residence.json](samples/boq-demo-residence.json)) or an `.xlsx`, which Muse Spark parses first. A JSON BOQ may declare `"zones"`; loose photos then go into its single zone, so every visit uses the same zone.
 - Uses an in-memory database (`DATABASE_URL=pglite:memory`) and local file storage (`STORAGE_LOCAL_DIR`), both set by the script.
 - Streams every trace step with the running cost, then prints a results table, photo requests, total steps and cost. Masks and a full JSON report go to `samples/out/dry-run-<time>/`.
 - Spend is capped by `MAX_COST_PER_VISIT_USD` in `.env`.

@@ -130,7 +130,11 @@ export const ToolArgs = {
   get_previous_assessment: z.object({ boq_item_id: z.number().int() }),
   record_assessment: z.object({
     boq_item_id: z.number().int(),
-    percent_complete: z.number().min(0).max(100),
+    percent_complete: z.number().min(0).max(100).optional().describe("Required for items without stages."),
+    stage_reached: z
+      .string()
+      .optional()
+      .describe("Staged items only: name of the latest COMPLETED stage, or \"none\". Code computes the percent."),
     qty_done: z.number().nonnegative().optional(),
     panel_measurement_id: z
       .number()

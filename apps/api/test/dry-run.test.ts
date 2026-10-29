@@ -123,7 +123,9 @@ beforeAll(async () => {
 describe("agent dry run", () => {
   it("runs the agent end to end and prints trace, results table, ask-backs, steps and cost", async () => {
     const lines: string[] = [];
-    const summary = await runDryRun({ photosDir, boqPath: BOQ_DEMO, outDir, out: (l) => lines.push(l) });
+    const result = await runDryRun({ photosDir, boqPath: BOQ_DEMO, outDir, out: (l) => lines.push(l) });
+    const summary = result.visits[0]!;
+    expect(result.visits).toHaveLength(1);
     const text = lines.join("\n");
 
     // Setup
@@ -154,9 +156,9 @@ describe("agent dry run", () => {
     expect(summary.costUsd).toBeCloseTo(0.0049, 6);
 
     const report = JSON.parse(await readFile(join(outDir, "dry-run.json"), "utf8"));
-    expect(report.assessments[0].rationale).toBe("4 of 16 ground-floor columns cast in the east bay photo.");
+    expect(report.visits[0].assessments[0].rationale).toBe("4 of 16 ground-floor columns cast in the east bay photo.");
     const askId = summary.askBacks[0]!.id;
-    expect(report.items.map((i: { code: string; status: string }) => [i.code, i.status])).toEqual([
+    expect(report.visits[0].items.map((i: { code: string; status: string }) => [i.code, i.status])).toEqual([
       ["PB-1", "not assessed"],
       ["GF-1", "assessed"],
       ["RF-1", "not assessed"],

@@ -4,6 +4,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import sharp from "sharp";
 import {
   SegmentTarget,
+  stagePercent,
   ToolArgs,
   TOOL_NAMES,
   type AgentStepKind,
@@ -83,7 +84,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     "Pure code, no model; verified segments only. mode='panel' (area items): fraction of ONE bay's full designed wall area covered by target_segment_ids. The panel is the whole bay: between two cast columns (left_column_id, right_column_id) from the top of the plinth (bottom_y) to the underside of the beam/slab above (top_y), or the same area as a 4-point polygon. Never draw it around the existing masonry only. If the beam/slab or the columns of the bay are not visible or not built, do not use panel mode. One measurement per bay; returns measurement_id for record_assessment. mode='reference': count + approximate m² from a scale object that happens to be visible.",
   get_previous_assessment: "Get the last engineer-accepted assessment of a BOQ item from an earlier visit.",
   record_assessment:
-    `Record (or overwrite) the progress assessment for one BOQ item in this visit, with evidence. You give percent_complete; code computes qty_done (any qty_done you pass is ignored except for count items): area items measured in panel mode → pass panel_measurement_ids (one per bay), qty_done = sum of fractions × panel_planned_qty, capped at planned_qty; visual estimates → percent_complete × planned_qty. Area items without a panel measurement are capped at confidence ${UNMEASURED_AREA_MAX_CONFIDENCE}. Set deviation when the visible material or work differs from the BOQ spec.`,
+    `Record (or overwrite) the progress assessment for one BOQ item in this visit, with evidence. You give percent_complete — or, for staged items, stage_reached (the latest completed stage, or "none"), from which code computes the percent; code computes qty_done (any qty_done you pass is ignored except for count items): area items measured in panel mode → pass panel_measurement_ids (one per bay), qty_done = sum of fractions × panel_planned_qty, capped at planned_qty; visual estimates → percent_complete × planned_qty. Area items without a panel measurement are capped at confidence ${UNMEASURED_AREA_MAX_CONFIDENCE}. Set deviation when the visible material or work differs from the BOQ spec. If progress is lower than the previous accepted assessment, code records that as a deviation.`,
   request_photo:
     "Ask the site engineer for one extra photo when confidence is low. It must be doable with only a phone in 30 seconds, e.g. \"square-on photo of the whole bay between columns C3 and C4, including the beam above and the plinth below\". Never ask for tapes, A4 sheets or any measuring tool.",
   finish: "End the run with a short summary once all relevant items are assessed or have an open photo request.",
@@ -153,6 +154,7 @@ const handlers: Handlers = {
         unit: r.unit,
         planned_qty: r.plannedQty,
         panel_planned_qty: r.panelPlannedQty,
+        stages: r.stages,
         measure_mode: r.measureMode,
         segment_targets: r.segmentTargets,
       })),
@@ -425,25 +427,14 @@ const handlers: Handlers = {
   },
 
   async get_previous_assessment({ boq_item_id }, ctx) {
-    const [row] = await db
-      .select({ a: schema.assessments, visitDate: schema.visits.visitDate })
-      .from(schema.assessments)
-      .innerJoin(schema.visits, eq(schema.visits.id, schema.assessments.visitId))
-      .where(
-        and(
-          eq(schema.assessments.boqItemId, boq_item_id),
-          ne(schema.assessments.visitId, ctx.visitId),
-          inArray(schema.assessments.status, ["accepted", "edited"]),
-        ),
-      )
-      .orderBy(desc(schema.visits.visitDate), desc(schema.assessments.id))
-      .limit(1);
+    const row = await previousAccepted(boq_item_id, ctx);
     if (!row) return { output: { found: false } };
     return {
       output: {
         found: true,
         visit_date: row.visitDate,
         percent_complete: row.a.percentComplete,
+        stage_reached: row.a.stageReached,
         qty_done: row.a.qtyDone,
         rationale: row.a.rationale,
         engineer_note: row.a.engineerNote,
@@ -474,6 +465,39 @@ const handlers: Handlers = {
       }
     };
     if (item.measureMode === "visual_only") capConfidence(env.VISUAL_ONLY_MAX_CONFIDENCE, "for visual_only items");
+
+    // Percent: staged items name the latest completed stage and code converts it; others give percent_complete.
+    let percent: number;
+    let stageReached: string | null = null;
+    const stageList = item.stages ? `${item.stages.map((s) => `"${s.name}"`).join(", ")} or "none"` : "";
+    if (item.stages) {
+      const named = args.stage_reached?.trim();
+      if (!named) {
+        return { output: { error: `${item.code} is a staged item: give stage_reached (the latest completed stage: ${stageList}), not percent_complete.` } };
+      }
+      const p = stagePercent(item.stages, named);
+      if (p == null) return { output: { error: `stage_reached "${named}" is not a stage of ${item.code}. Use one of ${stageList}.` } };
+      percent = p;
+      stageReached = named;
+      if (args.percent_complete != null && Math.abs(args.percent_complete - p) > 0.01) {
+        notes.push(`percent_complete ${args.percent_complete} was ignored; for staged items it is computed from stage_reached ("${named}" → ${p}%).`);
+      }
+    } else {
+      if (args.stage_reached) return { output: { error: `${item.code} has no stages; give percent_complete instead of stage_reached.` } };
+      if (args.percent_complete == null) return { output: { error: `percent_complete is required for ${item.code}.` } };
+      percent = Math.min(100, args.percent_complete);
+    }
+
+    // Progress going backwards is never recorded silently: code states it as a deviation.
+    let deviation = args.deviation?.trim() || null;
+    const previous = await previousAccepted(item.id, ctx);
+    if (previous && percent < previous.a.percentComplete - 0.5) {
+      const was = `${previous.a.percentComplete}%${previous.a.stageReached ? ` (${previous.a.stageReached})` : ""}`;
+      const now = `${percent}%${stageReached ? ` (${stageReached})` : ""}`;
+      const fact = `Progress went backwards: ${was} at the visit of ${previous.visitDate}, now ${now}.`;
+      deviation = deviation ? `${deviation} ${fact}` : fact;
+      notes.push(`${fact} Recorded as a deviation; explain it in the rationale if the earlier assessment was wrong.`);
+    }
 
     // Quantities are computed by code, never by the model's arithmetic:
     //   panel measurements → Σ fraction × panel_planned_qty; visual estimates → percent × planned_qty.
@@ -524,27 +548,31 @@ const handlers: Handlers = {
       ignoreModelQty("from the panel measurements");
       if (item.plannedQty > 0) {
         const implied = (qtyDone / item.plannedQty) * 100;
-        if (Math.abs(args.percent_complete - implied) > 10) {
-          notes.push(`percent_complete ${args.percent_complete} differs from the ${Math.round(implied)}% implied by qty_done; check it.`);
+        if (Math.abs(percent - implied) > 10) {
+          notes.push(`percent_complete ${percent} differs from the ${Math.round(implied)}% implied by qty_done; check it.`);
         }
       }
       panelEvidence.push(...pms.map((p) => ({ photo_id: p.photoId, segment_ids: p.targetSegmentIds })));
     } else if (item.measureMode === "visual_only" || item.measureMode === "area") {
       // Visual estimate (visual_only, or an area item whose bay could not be measured).
       if (item.measureMode === "area") capConfidence(UNMEASURED_AREA_MAX_CONFIDENCE, "for area items without a panel measurement");
-      qtyDone = round3((Math.min(100, args.percent_complete) / 100) * item.plannedQty);
-      qtyBasis = `${Math.min(100, args.percent_complete)}% × ${item.plannedQty} ${item.unit} (planned_qty) = ${qtyDone} ${item.unit}`;
+      qtyDone = round3((percent / 100) * item.plannedQty);
+      const stagePart = stageReached && item.stages
+        ? `stage "${stageReached}" (${item.stages.slice(0, item.stages.findIndex((s) => s.name === stageReached) + 1).map((s) => s.weight).join(" + ") || "0"}) = `
+        : "";
+      qtyBasis = `${stagePart}${percent}% × ${item.plannedQty} ${item.unit} (planned_qty) = ${qtyDone} ${item.unit}`;
       ignoreModelQty("as percent_complete × planned_qty");
     }
 
     const values = {
       visitId: ctx.visitId,
       boqItemId: item.id,
-      percentComplete: Math.min(100, args.percent_complete),
+      percentComplete: percent,
       qtyDone,
       confidence,
       rationale: args.rationale,
-      deviation: args.deviation ?? null,
+      deviation,
+      stageReached,
       status: "proposed" as const,
     };
     const assessmentId = await db.transaction(async (tx) => {
@@ -570,7 +598,17 @@ const handlers: Handlers = {
     const lowConfidence = confidence < env.ASK_BACK_THRESHOLD;
     if (lowConfidence) notes.push(`Confidence is below ${env.ASK_BACK_THRESHOLD}; consider request_photo.`);
     return {
-      output: { ok: true, assessment_id: assessmentId, confidence, qty_done: qtyDone, ...(qtyBasis ? { qty_basis: qtyBasis } : {}), notes },
+      output: {
+        ok: true,
+        assessment_id: assessmentId,
+        percent_complete: percent,
+        ...(stageReached ? { stage_reached: stageReached } : {}),
+        confidence,
+        qty_done: qtyDone,
+        ...(qtyBasis ? { qty_basis: qtyBasis } : {}),
+        ...(deviation ? { deviation } : {}),
+        notes,
+      },
     };
   },
 
@@ -619,6 +657,24 @@ async function getPhoto(photoId: number, ctx: ToolContext): Promise<PhotoRow> {
     .where(and(eq(schema.photos.id, photoId), eq(schema.photos.visitId, ctx.visitId)));
   if (!photo) throw new Error(`photo_id ${photoId} is not in this visit`);
   return photo;
+}
+
+/** The latest engineer-accepted (or edited) assessment of an item from another visit. */
+async function previousAccepted(boqItemId: number, ctx: ToolContext) {
+  const [row] = await db
+    .select({ a: schema.assessments, visitDate: schema.visits.visitDate })
+    .from(schema.assessments)
+    .innerJoin(schema.visits, eq(schema.visits.id, schema.assessments.visitId))
+    .where(
+      and(
+        eq(schema.assessments.boqItemId, boqItemId),
+        ne(schema.assessments.visitId, ctx.visitId),
+        inArray(schema.assessments.status, ["accepted", "edited"]),
+      ),
+    )
+    .orderBy(desc(schema.visits.visitDate), desc(schema.visits.id), desc(schema.assessments.id))
+    .limit(1);
+  return row ?? null;
 }
 
 /** Text that replaces a fully verified photo's images in the conversation, so the outcome stays in context. */

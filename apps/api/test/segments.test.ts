@@ -452,6 +452,7 @@ describe("BOQ rules", () => {
     measureMode,
     segmentTargets,
     panelPlannedQty: null,
+    stages: null,
     sequenceNo: null,
   });
 

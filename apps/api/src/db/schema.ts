@@ -38,12 +38,14 @@ export const boqItems = pgTable("boq_items", {
   zoneId: integer("zone_id").references(() => zones.id, { onDelete: "set null" }),
   code: text("code").notNull(),
   description: text("description").notNull(),
-  unit: text("unit", { enum: ["nos", "m2", "m3", "rmt", "kg"] }).notNull(),
+  unit: text("unit", { enum: ["nos", "m2", "m3", "rmt", "kg", "lot"] }).notNull(),
   plannedQty: numeric("planned_qty", { mode: "number" }).notNull(),
   measureMode: text("measure_mode", { enum: ["count", "area", "visual_only"] }).notNull(),
   segmentTargets: text("segment_targets", { enum: ["column", "brickwork"] }).array().notNull().default([]),
   // Area items: planned qty inside one photographed panel; qty_done = panel fraction × this (else × planned_qty).
   panelPlannedQty: numeric("panel_planned_qty", { mode: "number" }),
+  // Visual-only items built in stages: [{ name, weight }], weights sum to 1.
+  stages: jsonb("stages").$type<{ name: string; weight: number }[]>(),
   sequenceNo: integer("sequence_no"),
 });
 
@@ -179,6 +181,7 @@ export const assessments = pgTable(
       .notNull()
       .default("proposed"),
     engineerNote: text("engineer_note"),
+    stageReached: text("stage_reached"), // staged items: latest completed stage named by the agent
   },
   (t) => [uniqueIndex("assessments_visit_item_uq").on(t.visitId, t.boqItemId)],
 );

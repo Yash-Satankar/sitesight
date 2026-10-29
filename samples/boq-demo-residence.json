@@ -1,0 +1,46 @@
+{
+  "zones": ["GF"],
+  "items": [
+    {
+      "code": "FTG-1",
+      "description": "RCC footings F1/F2, 18\" deep",
+      "unit": "nos",
+      "plannedQty": 10,
+      "measureMode": "visual_only",
+      "segmentTargets": [],
+      "sequenceNo": 1
+    },
+    {
+      "code": "COL-GF",
+      "description": "RCC columns, ground floor (C2 9\"x18\" x10, C1 9\"x9\" x2)",
+      "unit": "nos",
+      "plannedQty": 12,
+      "measureMode": "count",
+      "segmentTargets": ["column"],
+      "sequenceNo": 3
+    },
+    {
+      "code": "PB-1",
+      "description": "Plinth beams PB1/PB2, 9\"x12\"",
+      "unit": "lot",
+      "plannedQty": 1,
+      "measureMode": "visual_only",
+      "segmentTargets": [],
+      "sequenceNo": 2
+    },
+    {
+      "code": "SLB-GF",
+      "description": "Ground-floor roof slab, 5\" (125 mm) RCC",
+      "unit": "m3",
+      "plannedQty": 12.7,
+      "measureMode": "visual_only",
+      "segmentTargets": [],
+      "stages": [
+        { "name": "shuttering", "weight": 0.25 },
+        { "name": "reinforcement", "weight": 0.35 },
+        { "name": "concreting", "weight": 0.4 }
+      ],
+      "sequenceNo": 4
+    }
+  ]
+}

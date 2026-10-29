@@ -8,9 +8,11 @@ import { describeStep, discoverZones, parseBoqJson, parseDryRunArgs } from "../s
 
 describe("parseDryRunArgs", () => {
   it("requires --photos and --boq", () => {
-    expect(parseDryRunArgs(["--photos", "p", "--boq", "b.json"])).toEqual({ photos: "p", boq: "b.json", help: false });
-    expect(parseDryRunArgs(["--", "--photos=p", "--boq=b.xlsx"])).toMatchObject({ photos: "p", boq: "b.xlsx" });
-    expect(() => parseDryRunArgs(["--boq", "b.json"])).toThrow(/--photos <dir> is required/);
+    expect(parseDryRunArgs(["--photos", "p", "--boq", "b.json"])).toEqual({ visits: ["p"], boq: "b.json", help: false });
+    expect(parseDryRunArgs(["--", "--photos=p", "--boq=b.xlsx"])).toMatchObject({ visits: ["p"], boq: "b.xlsx" });
+    expect(parseDryRunArgs(["--visits", "samples/demo-residence/v1, samples/demo-residence/v2,", "--boq", "b.json"]).visits).toEqual(["samples/demo-residence/v1", "samples/demo-residence/v2"]);
+    expect(() => parseDryRunArgs(["--photos", "p", "--visits", "a,b", "--boq", "b.json"])).toThrow(/either --photos .* or --visits/);
+    expect(() => parseDryRunArgs(["--boq", "b.json"])).toThrow(/--photos <dir> or --visits <dir1,dir2,…> is required/);
     expect(() => parseDryRunArgs(["--photos", "p"])).toThrow(/--boq .* is required/);
     expect(() => parseDryRunArgs(["--photo", "p"])).toThrow(/Unknown option/);
     expect(parseDryRunArgs(["-h"]).help).toBe(true);
@@ -57,7 +59,8 @@ describe("discoverZones", () => {
 describe("parseBoqJson", () => {
   it("accepts the committed demo BOQ", async () => {
     const text = await readFile(fileURLToPath(new URL("../../../samples/boq-demo.json", import.meta.url)), "utf8");
-    const items = parseBoqJson(text);
+    const { items, zones } = parseBoqJson(text);
+    expect(zones).toBeNull();
     expect(items.map((i) => [i.code, i.measureMode, i.segmentTargets, i.panelPlannedQty])).toEqual([
       ["PB-1", "visual_only", [], null],
       ["GF-1", "count", ["column"], null],
@@ -67,7 +70,7 @@ describe("parseBoqJson", () => {
   });
 
   it("accepts a bare array and reports every invalid item at once", () => {
-    expect(parseBoqJson(JSON.stringify([{ code: "A", description: "x", unit: "nos", plannedQty: 1, measureMode: "visual_only" }]))).toHaveLength(1);
+    expect(parseBoqJson(JSON.stringify([{ code: "A", description: "x", unit: "nos", plannedQty: 1, measureMode: "visual_only" }])).items).toHaveLength(1);
     expect(() =>
       parseBoqJson(
         JSON.stringify({
