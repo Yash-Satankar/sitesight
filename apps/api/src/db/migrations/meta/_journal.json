@@ -43,6 +43,13 @@
       "when": 1793247360257,
       "tag": "0005_omniscient_layla_miller",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793251582434,
+      "tag": "0006_robust_sunspot",
+      "breakpoints": true
     }
   ]
 }

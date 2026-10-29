@@ -30,6 +30,8 @@ export const Assessment = z.object({
   engineerNote: z.string().nullable(),
   basis: EvidenceBasis,
   evidence: z.array(Evidence),
+  /** Panel measurements behind qty_done (area items): drawn on the evidence photo in review. */
+  panels: z.array(z.object({ id: z.number().int(), photoId: z.number().int(), fraction: z.number() })),
 });
 export type Assessment = z.infer<typeof Assessment>;
 

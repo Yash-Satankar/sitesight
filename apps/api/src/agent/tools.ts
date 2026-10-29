@@ -617,6 +617,7 @@ const handlers: Handlers = {
       deviation,
       stageReached,
       basis: args.basis,
+      panelMeasurementIds: panelIds,
       status: "proposed" as const,
     };
     const assessmentId = await db.transaction(async (tx) => {
@@ -791,7 +792,7 @@ async function verifiedSegments(
 }
 
 /** Turn the model's panel argument into a pixel region. Throws PanelError with a message for the model. */
-async function resolvePanel(photo: PhotoRow, spec: PanelSpecArg): Promise<{ panel: Panel; columnIds: number[] }> {
+export async function resolvePanel(photo: PhotoRow, spec: PanelSpecArg): Promise<{ panel: Panel; columnIds: number[] }> {
   if ("polygon" in spec) {
     return { panel: buildPanel({ kind: "polygon", points: spec.polygon as Point[] }, photo.width, photo.height), columnIds: [] };
   }

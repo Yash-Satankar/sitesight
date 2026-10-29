@@ -21,6 +21,13 @@ export async function loadAssessments(visitId: number): Promise<Assessment[]> {
   const ev = ids.length
     ? await db.select().from(schema.assessmentEvidence).where(inArray(schema.assessmentEvidence.assessmentId, ids))
     : [];
+  const panelIds = [...new Set(rows.flatMap((r) => r.panelMeasurementIds))];
+  const panels = panelIds.length
+    ? await db
+        .select({ id: schema.panelMeasurements.id, photoId: schema.panelMeasurements.photoId, fraction: schema.panelMeasurements.fraction })
+        .from(schema.panelMeasurements)
+        .where(inArray(schema.panelMeasurements.id, panelIds))
+    : [];
   return rows.map((a) => ({
     id: a.id,
     visitId: a.visitId,
@@ -34,6 +41,7 @@ export async function loadAssessments(visitId: number): Promise<Assessment[]> {
     engineerNote: a.engineerNote,
     basis: a.basis,
     evidence: ev.filter((e) => e.assessmentId === a.id).map((e) => ({ photoId: e.photoId, segmentIds: e.segmentIds })),
+    panels: panels.filter((p) => a.panelMeasurementIds.includes(p.id)),
   }));
 }
 

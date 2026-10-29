@@ -79,9 +79,14 @@ function ReviewCard({
 
   return (
     <article className="card grid gap-4 md:grid-cols-[1fr_1.2fr]">
-      <div className="grid grid-cols-2 gap-2">
+      <div className={`grid gap-2 ${a.evidence.length > 1 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
         {a.evidence.slice(0, 4).map((ev) => (
-          <PhotoWithMasks key={ev.photoId} photo={photos.find((p) => p.id === ev.photoId)} segmentIds={ev.segmentIds} />
+          <PhotoWithMasks
+            key={ev.photoId}
+            photo={photos.find((p) => p.id === ev.photoId)}
+            segmentIds={ev.segmentIds}
+            panelIds={a.panels.filter((p) => p.photoId === ev.photoId).map((p) => p.id)}
+          />
         ))}
       </div>
       <div className="space-y-2 text-sm">
@@ -101,6 +106,11 @@ function ReviewCard({
           <span className="ml-2 text-gray-500">confidence {(a.confidence * 100).toFixed(0)}%</span>
         </p>
         <p className="text-gray-700">{a.rationale}</p>
+        {a.panels.length > 0 && (
+          <p className="text-xs text-gray-600">
+            Measured panel{a.panels.length > 1 ? "s" : ""}: {a.panels.map((p) => `${Math.round(p.fraction * 100)}% filled`).join(", ")}
+          </p>
+        )}
         {a.deviation && <p className="rounded bg-red-50 px-2 py-1 text-red-700">Deviation: {a.deviation}</p>}
 
         {editing ? (

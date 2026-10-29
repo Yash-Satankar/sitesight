@@ -1,0 +1,1 @@
+ALTER TABLE "assessments" ADD COLUMN "panel_measurement_ids" integer[] DEFAULT '{}' NOT NULL;

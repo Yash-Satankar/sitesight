@@ -184,6 +184,8 @@ export const assessments = pgTable(
     stageReached: text("stage_reached"), // staged items: latest completed stage named by the agent
     // observed in this visit's photos, or inferred (hidden earlier-sequence work; not billable until observed)
     basis: text("basis", { enum: ["observed", "inferred"] }).notNull().default("observed"),
+    // Panel measurements behind qty_done (area items), so the review screen can draw them.
+    panelMeasurementIds: integer("panel_measurement_ids").array().notNull().default([]),
   },
   (t) => [uniqueIndex("assessments_visit_item_uq").on(t.visitId, t.boqItemId)],
 );
