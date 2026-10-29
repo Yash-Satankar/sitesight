@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Unit, type BoqItemInput } from "@sitesight/shared";
 import { api } from "../lib/api";
+import { FileSpreadsheet, Loader2, Save, TriangleAlert } from "lucide-react";
 import { ErrorNote } from "../components/Layout";
+import { BottomBar, BottomBarSpacer, TopBar } from "../components/ui";
 
 // Only columns (count) and brickwork (area) can be measured from photos; the API rejects other combinations.
 const MEASURED_AS = {
@@ -24,6 +26,7 @@ export function BoqReviewPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const [fileName, setFileName] = useState<string | null>(null);
 
   async function onFile(file: File) {
     setBusy(true);
@@ -55,100 +58,104 @@ export function BoqReviewPage() {
     setItems((prev) => prev && prev.map((it, j) => (j === i ? { ...it, ...patch } : it)));
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold">BOQ review</h1>
-      <div className="card">
-        <label className="block text-sm">
-          <span className="mb-1 block text-gray-600">Upload the BOQ (.xlsx). Muse Spark parses it into line items.</span>
-          <input type="file" accept=".xlsx" disabled={busy} onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+    <div className="mx-auto max-w-3xl">
+      <TopBar back={`/projects/${projectId}`} title="Upload BOQ" subtitle="Check the parsed items, then save" />
+      <div className="space-y-5">
+        <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-accent/50 bg-accent-soft px-4 py-5 text-center text-accent-strong">
+          {busy && !items ? <Loader2 className="h-8 w-8 animate-spin" aria-hidden /> : <FileSpreadsheet className="h-8 w-8" aria-hidden />}
+          <span className="text-base font-bold">{busy && !items ? "Parsing the BOQ…" : fileName ? fileName : "Choose the BOQ spreadsheet (.xlsx)"}</span>
+          <span className="text-sm text-slate-700">Muse Spark reads it into line items you can check below.</span>
+          <input
+            type="file"
+            accept=".xlsx"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              setFileName(f.name);
+              void onFile(f);
+            }}
+          />
         </label>
-        {busy && !items && <p className="mt-2 text-sm text-gray-500">Parsing…</p>}
-      </div>
-      <ErrorNote error={error} />
-      {warnings.length > 0 && (
-        <ul className="rounded-lg bg-amber-50 px-4 py-2 text-sm text-amber-800">
-          {warnings.map((w, i) => (
-            <li key={i}>⚠ {w}</li>
-          ))}
-        </ul>
-      )}
+        <ErrorNote error={error} />
+        {warnings.length > 0 && (
+          <ul className="space-y-1 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            {warnings.map((w, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden /> {w}
+              </li>
+            ))}
+          </ul>
+        )}
 
-      {items && (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left text-xs uppercase text-gray-500">
-              <tr>
-                <th className="p-1">Code</th>
-                <th className="p-1">Description</th>
-                <th className="p-1">Unit</th>
-                <th className="p-1">Planned qty</th>
-                <th className="p-1">Measured as</th>
-                <th className="p-1" title="Planned quantity inside one photographed panel, e.g. one brick bay between two columns">Panel qty</th>
-                <th className="p-1" title="Visual-only items built in stages; the agent names the latest completed stage">Stages</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((it, i) => (
-                <tr key={i} className="align-top">
-                  <td className="p-1 font-mono text-xs">{it.code}</td>
-                  <td className="p-1">{it.description}</td>
-                  <td className="p-1">
-                    <select className="input" value={it.unit} onChange={(e) => update(i, { unit: e.target.value as Unit })}>
+        {items && (
+          <ul className="space-y-3">
+            {items.map((it, i) => (
+              <li key={i} className="card space-y-3">
+                <p className="text-[15px] leading-snug">
+                  <span className="mr-1.5 font-mono text-xs font-semibold text-slate-600">{it.code}</span>
+                  {it.description}
+                </p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <label className="block text-xs font-semibold text-slate-600">
+                    Planned qty
+                    <input className="input num mt-1" type="number" inputMode="decimal" min={0} value={it.plannedQty} onChange={(e) => update(i, { plannedQty: Number(e.target.value) })} />
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-600">
+                    Unit
+                    <select className="input mt-1" value={it.unit} onChange={(e) => update(i, { unit: e.target.value as Unit })}>
                       {Unit.options.map((u) => (
                         <option key={u}>{u}</option>
                       ))}
                     </select>
-                  </td>
-                  <td className="p-1">
-                    <input
-                      className="input w-24"
-                      type="number"
-                      min={0}
-                      value={it.plannedQty}
-                      onChange={(e) => update(i, { plannedQty: Number(e.target.value) })}
-                    />
-                  </td>
-                  <td className="p-1">
-                    <select
-                      className="input"
-                      value={measuredAs(it)}
-                      onChange={(e) => update(i, MEASURED_AS[e.target.value as keyof typeof MEASURED_AS].patch)}
-                    >
+                  </label>
+                  <label className="col-span-2 block text-xs font-semibold text-slate-600">
+                    Measured as
+                    <select className="input mt-1" value={measuredAs(it)} onChange={(e) => update(i, MEASURED_AS[e.target.value as keyof typeof MEASURED_AS].patch)}>
                       {Object.entries(MEASURED_AS).map(([key, opt]) => (
                         <option key={key} value={key}>
                           {opt.label}
                         </option>
                       ))}
                     </select>
-                  </td>
-                  <td className="p-1">
-                    {it.measureMode === "area" ? (
+                  </label>
+                  {it.measureMode === "area" && (
+                    <label className="col-span-2 block text-xs font-semibold text-slate-600" title="Planned quantity inside one photographed panel, e.g. one brick bay between two columns">
+                      Qty in one bay (optional)
                       <input
-                        className="input w-24"
+                        className="input num mt-1"
                         type="number"
+                        inputMode="decimal"
                         min={0}
                         placeholder="optional"
                         value={it.panelPlannedQty ?? ""}
                         onChange={(e) => update(i, { panelPlannedQty: e.target.value === "" ? null : Number(e.target.value) })}
                       />
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className="p-1 text-xs text-gray-600" title="Read-only for now">
-                    {it.stages?.length ? it.stages.map((s) => `${s.name} ${Math.round(s.weight * 100)}%`).join(" → ") : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="mt-4 flex justify-end">
-            <button className="btn" onClick={save} disabled={busy}>
-              Save {items.length} items
-            </button>
-          </div>
-        </div>
-      )}
+                    </label>
+                  )}
+                </div>
+                {it.stages?.length ? (
+                  <p className="num text-xs text-slate-600">
+                    <span className="font-semibold">Stages:</span> {it.stages.map((s) => `${s.name} ${Math.round(s.weight * 100)}%`).join(" → ")}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {items && (
+          <>
+            <BottomBarSpacer />
+            <BottomBar>
+              <button className="btn flex-1" onClick={save} disabled={busy}>
+                <Save className="h-5 w-5" aria-hidden /> Save {items.length} items
+              </button>
+            </BottomBar>
+          </>
+        )}
+      </div>
     </div>
   );
 }

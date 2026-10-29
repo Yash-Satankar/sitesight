@@ -1,49 +1,51 @@
 import type { BoqItem } from "@sitesight/shared";
+import { ClipboardList } from "lucide-react";
+import { Chip, EmptyState, ProgressBar, capitalize, fmtQty, stageForPercent } from "./ui";
 
+const MODE_LABEL: Record<string, string> = { count: "counted", area: "measured", visual_only: "visual" };
+
+/** BOQ items as rows: code + description, progress bar with a big %, stage for staged items, status chip. */
 export function BoqTable({ items, progress }: { items: BoqItem[]; progress: Record<string, number> }) {
-  if (!items.length) return <p className="text-sm text-gray-500">No BOQ items yet.</p>;
+  if (!items.length) {
+    return (
+      <EmptyState icon={ClipboardList} title="No BOQ items yet">
+        Upload the bill of quantities to start tracking progress.
+      </EmptyState>
+    );
+  }
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="text-left text-xs uppercase text-gray-500">
-          <tr>
-            <th className="py-2 pr-3">Code</th>
-            <th className="py-2 pr-3">Description</th>
-            <th className="py-2 pr-3">Qty</th>
-            <th className="py-2 pr-3">Mode</th>
-            <th className="w-48 py-2">Progress</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {items.map((it) => {
-            const pct = progress[String(it.id)];
-            return (
-              <tr key={it.id}>
-                <td className="py-2 pr-3 font-mono text-xs">{it.code}</td>
-                <td className="py-2 pr-3">{it.description}</td>
-                <td className="whitespace-nowrap py-2 pr-3">
-                  {it.plannedQty} {it.unit}
-                </td>
-                <td className="py-2 pr-3 text-xs text-gray-500">{it.measureMode}</td>
-                <td className="py-2">
-                  <ProgressBar pct={pct} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-export function ProgressBar({ pct }: { pct: number | undefined }) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100">
-        <div className="h-full rounded-full bg-amber-500" style={{ width: `${pct ?? 0}%` }} />
-      </div>
-      <span className="w-10 text-right text-xs text-gray-600">{pct != null ? `${Math.round(pct)}%` : "—"}</span>
-    </div>
+    <ul className="divide-y divide-slate-100">
+      {items.map((it) => {
+        const pct = progress[String(it.id)];
+        const stage = stageForPercent(it.stages, pct);
+        const done = pct != null && pct >= 99.5;
+        return (
+          <li key={it.id} className="py-3 first:pt-1 last:pb-1">
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] leading-snug">
+                  <span className="mr-1.5 font-mono text-xs font-semibold text-slate-600">{it.code}</span>
+                  {it.description}
+                </p>
+                <p className="num mt-0.5 text-xs text-slate-600">
+                  {fmtQty(it.plannedQty)} {it.unit} planned · {MODE_LABEL[it.measureMode] ?? it.measureMode}
+                  {it.stages?.length ? ` · ${it.stages.length} stages` : ""}
+                </p>
+              </div>
+              {pct == null ? (
+                <span className="shrink-0 pt-0.5 text-sm font-medium text-slate-500">No data</span>
+              ) : (
+                <span className="num shrink-0 text-2xl leading-none font-bold">{Math.round(pct)}%</span>
+              )}
+            </div>
+            <ProgressBar pct={pct} tone={done ? "done" : "busy"} className="mt-2" />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {done ? <Chip tone="done">Done</Chip> : pct != null && pct > 0 ? <Chip tone="neutral">In progress</Chip> : <Chip tone="neutral">Not started</Chip>}
+              {stage && !done && <span className="text-sm text-slate-700">Stage: <strong>{capitalize(stage)}</strong></span>}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

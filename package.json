@@ -21,7 +21,8 @@
     "agent-dry-run": "pnpm --filter @sitesight/api agent-dry-run",
     "dev:web:https": "pnpm --filter @sitesight/web dev:https",
     "e2e-smoke": "pnpm --filter @sitesight/api e2e-smoke",
-    "db:purge-e2e": "pnpm --filter @sitesight/api db:purge-e2e"
+    "db:purge-e2e": "pnpm --filter @sitesight/api db:purge-e2e",
+    "ui-shots": "pnpm --filter @sitesight/web ui-shots"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

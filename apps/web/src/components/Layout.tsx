@@ -1,18 +1,22 @@
-import { isRouteErrorResponse, Link, Outlet, useRouteError } from "react-router-dom";
+import { isRouteErrorResponse, Link, Outlet, useLocation, useRouteError } from "react-router-dom";
+import { XCircle } from "lucide-react";
 
 export function Layout() {
+  const home = useLocation().pathname === "/";
   return (
     <div className="min-h-dvh">
-      <header className="sticky top-0 z-10 border-b border-gray-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
-          <Link to="/" className="flex items-center gap-2 font-semibold">
-            <img src="/icon.svg" alt="" className="h-7 w-7" />
-            SiteSight
-          </Link>
-          <span className="text-xs text-gray-500">AI site-progress auditor</span>
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl px-4 py-6">
+      {home && (
+        <header className="border-b border-slate-200 bg-white">
+          <div className="mx-auto flex min-h-14 max-w-5xl items-center gap-3 px-4 sm:px-6">
+            <Link to="/" className="flex items-center gap-2 text-lg font-bold">
+              <img src="/icon.svg" alt="" className="h-8 w-8" />
+              SiteSight
+            </Link>
+            <span className="hidden text-sm text-slate-600 sm:inline">AI site-progress auditor</span>
+          </div>
+        </header>
+      )}
+      <main className={`mx-auto max-w-5xl px-4 sm:px-6 ${home ? "py-5" : "pb-6"}`}>
         <Outlet />
       </main>
     </div>
@@ -21,36 +25,11 @@ export function Layout() {
 
 export function ErrorNote({ error }: { error: string | null }) {
   if (!error) return null;
-  return <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>;
-}
-
-export function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    draft: "bg-gray-100 text-gray-700",
-    queued: "bg-blue-100 text-blue-700",
-    processing: "bg-blue-100 text-blue-700",
-    needs_input: "bg-amber-100 text-amber-800",
-    assessed: "bg-violet-100 text-violet-700",
-    reviewed: "bg-green-100 text-green-700",
-    reported: "bg-green-200 text-green-900",
-    proposed: "bg-gray-100 text-gray-700",
-    accepted: "bg-green-100 text-green-700",
-    edited: "bg-teal-100 text-teal-700",
-  };
   return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${colors[status] ?? "bg-gray-100"}`}>
-      {status.replace("_", " ")}
-    </span>
-  );
-}
-
-/** Shown on inferred assessments: hidden earlier-sequence work, not billable until observed. */
-export function InferredBadge({ basis }: { basis: string }) {
-  if (basis !== "inferred") return null;
-  return (
-    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900" title="Deduced from later work seen in this visit">
-      inferred — not billable until observed
-    </span>
+    <p role="alert" className="flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-900">
+      <XCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+      <span className="min-w-0 break-words">{error}</span>
+    </p>
   );
 }
 
@@ -63,9 +42,9 @@ export function RouteError() {
       ? error.message
       : String(error);
   return (
-    <div className="mx-auto max-w-md space-y-3 px-4 py-10">
-      <h1 className="text-lg font-semibold">Something went wrong</h1>
-      <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{message}</p>
+    <div className="mx-auto max-w-md space-y-4 px-4 py-10">
+      <h1 className="text-xl font-bold">Something went wrong</h1>
+      <ErrorNote error={message} />
       <div className="flex gap-2">
         <button className="btn" onClick={() => window.location.reload()}>
           Reload
