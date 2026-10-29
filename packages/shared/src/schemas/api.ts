@@ -100,10 +100,15 @@ export const Photo = z.object({
 });
 export type Photo = z.infer<typeof Photo>;
 
+/** An ask-back still open from an earlier visit of the same project; a photo in this visit can answer it. */
+export const EarlierAskBack = AskBack.extend({ visitDate: z.string() });
+export type EarlierAskBack = z.infer<typeof EarlierAskBack>;
+
 export const VisitDetail = VisitSummary.extend({
   photos: z.array(Photo),
   assessments: z.array(Assessment),
   askBacks: z.array(AskBack),
+  earlierOpenAskBacks: z.array(EarlierAskBack),
 });
 export type VisitDetail = z.infer<typeof VisitDetail>;
 

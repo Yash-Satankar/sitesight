@@ -44,6 +44,7 @@ import { systemPrompt } from "../src/agent/prompts.js";
 import { boqItemStatus } from "../src/lib/item-status.js";
 import { billLines, buildReport, type ReportItem } from "../src/services/report.js";
 import { assertAskBackOpenInProject, fulfilAskBack } from "../src/services/ask-backs.js";
+import { loadVisitDetail } from "../src/lib/queries.js";
 import { runDryRun } from "../scripts/dry-run.js";
 
 const db = mockedDb as unknown as PgliteDatabase<typeof schema>;
@@ -216,6 +217,29 @@ describe("2. ask-back dedupe and cross-visit fulfilment", () => {
 
     expect(await fulfilAskBack(ab, a.p1.id)).toEqual({ status: "fulfilled", resumed: true, closedEarlierVisit: false });
     expect((await db.select().from(schema.visits).where(eq(schema.visits.id, a.v1.id)))[0]!.status).toBe("queued");
+  });
+});
+
+describe("visit detail lists open requests from earlier visits (Capture / Visit pages)", () => {
+  it("includes only open ask-backs from other visits of the same project, with their visit date", async () => {
+    const { ctx1, v1, v2, zoneId, footing, plinth } = await seed();
+    const ask = async (boq_item_id: number, instruction: string) =>
+      out(await run("request_photo", { zone_id: zoneId, boq_item_id, instruction, reason: "r" }, ctx1)).ask_back_id as number;
+    const open = await ask(footing.id, "Square-on photo of footing F1 before backfill");
+    const closed = await ask(plinth.id, "Square-on photo of plinth beam PB1 on grid A");
+    await db.update(schema.askBacks).set({ status: "skipped" }).where(eq(schema.askBacks.id, closed));
+    const other = await seed(); // another project's open request must not leak in
+    await run("request_photo", { zone_id: other.zoneId, boq_item_id: other.footing.id, instruction: "Square-on photo of the other site", reason: "r" }, other.ctx1);
+
+    const later = await loadVisitDetail(v2.id);
+    expect(later.earlierOpenAskBacks).toEqual([
+      expect.objectContaining({ id: open, visitId: v1.id, status: "open", instruction: "Square-on photo of footing F1 before backfill", visitDate: v1.visitDate }),
+    ]);
+    expect(later.askBacks).toEqual([]);
+
+    const own = await loadVisitDetail(v1.id);
+    expect(own.earlierOpenAskBacks).toEqual([]); // a visit's own requests are in askBacks, not repeated here
+    expect(own.askBacks.map((a) => a.id)).toEqual([open, closed]);
   });
 });
 

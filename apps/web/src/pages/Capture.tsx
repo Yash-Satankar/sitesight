@@ -28,7 +28,9 @@ export function CapturePage() {
     if (zoneId == null && data?.project.zones[0]) setZoneId(data.project.zones[0].id);
   }, [data, zoneId]);
 
-  const askBack = data?.visit.askBacks.find((a) => a.id === askBackId);
+  // The request may be this visit's or still open from an earlier visit; a photo taken here answers either.
+  const earlierAskBack = data?.visit.earlierOpenAskBacks.find((a) => a.id === askBackId);
+  const askBack = data?.visit.askBacks.find((a) => a.id === askBackId) ?? earlierAskBack;
 
   async function submit() {
     if (!photo || zoneId == null) return;
@@ -69,6 +71,9 @@ export function CapturePage() {
       <h1 className="text-xl font-semibold">{askBack ? "Requested photo" : "Capture"}</h1>
       {askBack && (
         <div className="card border-amber-300 bg-amber-50 text-sm">
+          {earlierAskBack && (
+            <p className="mb-1 text-xs font-medium uppercase text-amber-800">Requested on the visit of {earlierAskBack.visitDate}</p>
+          )}
           <p className="font-medium">{askBack.instruction}</p>
           <p className="text-gray-600">{askBack.reason}</p>
         </div>

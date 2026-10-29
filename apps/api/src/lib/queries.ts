@@ -1,5 +1,5 @@
-import { and, eq, inArray } from "drizzle-orm";
-import type { Assessment, AskBack, Photo, VisitDetail, VisitSummary } from "@sitesight/shared";
+import { and, eq, inArray, ne } from "drizzle-orm";
+import type { Assessment, AskBack, EarlierAskBack, Photo, VisitDetail, VisitSummary } from "@sitesight/shared";
 import { db, schema } from "../db/client.js";
 import { presignGet } from "../services/storage.js";
 import { notFound } from "./http.js";
@@ -64,7 +64,25 @@ export async function loadVisitDetail(visitId: number): Promise<VisitDetail> {
     reason: a.reason,
     status: a.status,
   }));
-  return { ...toVisitSummary(visit), photos, assessments: await loadAssessments(visitId), askBacks };
+  // Requests still open from earlier visits of this project: a photo taken in this visit can answer them.
+  const earlierOpenAskBacks: EarlierAskBack[] = (
+    await db
+      .select({ a: schema.askBacks, visitDate: schema.visits.visitDate })
+      .from(schema.askBacks)
+      .innerJoin(schema.visits, eq(schema.visits.id, schema.askBacks.visitId))
+      .where(and(eq(schema.visits.projectId, visit.projectId), ne(schema.askBacks.visitId, visitId), eq(schema.askBacks.status, "open")))
+      .orderBy(schema.askBacks.id)
+  ).map(({ a, visitDate }) => ({
+    id: a.id,
+    visitId: a.visitId,
+    zoneId: a.zoneId,
+    boqItemId: a.boqItemId,
+    instruction: a.instruction,
+    reason: a.reason,
+    status: a.status,
+    visitDate,
+  }));
+  return { ...toVisitSummary(visit), photos, assessments: await loadAssessments(visitId), askBacks, earlierOpenAskBacks };
 }
 
 export async function countOpenAskBacks(visitId: number): Promise<number> {

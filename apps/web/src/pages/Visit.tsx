@@ -93,6 +93,22 @@ export function VisitPage() {
               }}
             />
           ))}
+          {visit.earlierOpenAskBacks.length > 0 && (
+            <h2 className="pt-1 text-sm font-semibold text-gray-700">Still open from earlier visits</h2>
+          )}
+          {visit.earlierOpenAskBacks.map((a) => (
+            <AskBackCard
+              key={a.id}
+              askBack={a}
+              zoneName={zoneName(a.zoneId)}
+              captureVisitId={visitId}
+              fromVisitDate={a.visitDate}
+              onSkip={async () => {
+                await api.skipAskBack(a.id);
+                await reload();
+              }}
+            />
+          ))}
           <div className="card">
             <h2 className="mb-3 font-semibold">Assessments</h2>
             {!visit.assessments.length && <p className="text-sm text-gray-500">None yet.</p>}
