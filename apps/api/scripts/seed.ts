@@ -1,9 +1,49 @@
 /**
- * Seed a demo project with zones and a hand-written BOQ (no Spark call, no client data).
- *   pnpm seed
+ * Seed a project.
+ *   pnpm seed                                                       # demo project, hand-written BOQ
+ *   pnpm seed --boq samples/boq-demo-residence.json --name "Demo Residence"  # project from a BOQ JSON
+ * No Spark call. A BOQ JSON's "zones" become the project's zones (default: one zone "Site").
  */
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { parseArgs } from "node:util";
 import type { BoqItemInput } from "@sitesight/shared";
 import { db, schema, sql } from "../src/db/client.js";
+import { boqItemProblem } from "../src/services/boq-rules.js";
+import { parseBoqJson } from "./dry-run-lib.js";
+
+const { values: args } = parseArgs({
+  args: process.argv.slice(2).filter((a) => a !== "--"),
+  options: { boq: { type: "string" }, name: { type: "string" }, location: { type: "string" } },
+  strict: true,
+});
+
+if (args.boq) {
+  const path = resolve(process.env.INIT_CWD ?? process.cwd(), args.boq);
+  const { items, zones: declared } = parseBoqJson(await readFile(path, "utf8"));
+  const problems = items.flatMap(({ zone: _z, ...it }) => {
+    const p = boqItemProblem({ ...it, zoneId: null });
+    return p ? [`${it.code}: ${p}`] : [];
+  });
+  if (problems.length) {
+    console.error(`Inconsistent BOQ items in ${path}:\n  ${problems.join("\n  ")}`);
+    process.exit(1);
+  }
+  const zoneNames = declared ?? ["Site"];
+  const [project] = await db
+    .insert(schema.projects)
+    .values({ name: args.name ?? "Untitled project", locationLabel: args.location ?? "" })
+    .returning();
+  const zones = await db
+    .insert(schema.zones)
+    .values(zoneNames.map((name, i) => ({ projectId: project!.id, name, sortOrder: i })))
+    .returning();
+  const zoneId = new Map(zones.map((z) => [z.name, z.id]));
+  await db.insert(schema.boqItems).values(items.map(({ zone, ...it }) => ({ ...it, projectId: project!.id, zoneId: zone ? zoneId.get(zone)! : null })));
+  console.log(`Seeded project ${project!.id} "${project!.name}" with zones ${zoneNames.join(", ")} and ${items.length} BOQ items from ${args.boq}.`);
+  await sql.end();
+  process.exit(0);
+}
 
 const ZONES = ["Ground Floor – Columns", "Floor 1 – East", "Floor 1 – West", "Terrace"];
 

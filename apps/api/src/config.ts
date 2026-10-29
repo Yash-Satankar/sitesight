@@ -38,6 +38,11 @@ const Env = z.object({
   // Store objects as files under this folder instead of R2 (scripts like agent-dry-run, local dev).
   STORAGE_LOCAL_DIR: z.string().default(""),
   WEB_ORIGIN: z.string().default("http://localhost:5173"),
+  // Dev: also accept browser origins on the local network (phone testing). Off when NODE_ENV=production.
+  ALLOW_LAN_ORIGINS: z
+    .enum(["true", "false"])
+    .default(process.env.NODE_ENV === "production" ? "false" : "true")
+    .transform((v) => v === "true"),
 
   // Worker
   WORKER_POLL_MS: z.coerce.number().int().positive().default(1000),
@@ -65,7 +70,10 @@ for (const key of PRICE_KEYS) {
   prices[key] = value;
 }
 
-export const env = { ...parsed.data, ...prices };
+// Relative STORAGE_LOCAL_DIR is resolved from the repo root, so the API, worker and scripts share one folder.
+const storageLocalDir = parsed.data.STORAGE_LOCAL_DIR ? resolve(repoRoot, parsed.data.STORAGE_LOCAL_DIR) : "";
+
+export const env = { ...parsed.data, ...prices, STORAGE_LOCAL_DIR: storageLocalDir };
 export type Env = typeof env;
 
 // The Meta model ids must never be a "-contributor" variant (those allow training on request data).

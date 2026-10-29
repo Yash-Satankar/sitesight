@@ -92,3 +92,15 @@ export async function countOpenAskBacks(visitId: number): Promise<number> {
     .where(and(eq(schema.askBacks.visitId, visitId), eq(schema.askBacks.status, "open")));
   return rows.length;
 }
+
+/** Ask-backs still open anywhere in the project (a request from an earlier visit can still block an item). */
+export async function openAskBacksForProject(projectId: number) {
+  return (
+    await db
+      .select({ a: schema.askBacks })
+      .from(schema.askBacks)
+      .innerJoin(schema.visits, eq(schema.visits.id, schema.askBacks.visitId))
+      .where(and(eq(schema.visits.projectId, projectId), eq(schema.askBacks.status, "open")))
+      .orderBy(schema.askBacks.id)
+  ).map(({ a }) => a);
+}

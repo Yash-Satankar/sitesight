@@ -17,7 +17,19 @@ import type {
   Zone,
 } from "@sitesight/shared";
 
-export const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8787";
+const CONFIGURED = (import.meta.env.VITE_API_URL as string | undefined)?.trim() || undefined;
+const POINTS_AT_LOCALHOST = CONFIGURED ? /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(CONFIGURED) : false;
+
+/**
+ * Dev: "/api", proxied to the API by Vite, so the app works from a phone on the LAN and over HTTPS
+ * (a localhost VITE_API_URL would point the phone at itself). Production: VITE_API_URL (e.g. the Railway API).
+ */
+export const API_URL = CONFIGURED && !(import.meta.env.DEV && POINTS_AT_LOCALHOST) ? CONFIGURED : import.meta.env.DEV ? "/api" : (CONFIGURED ?? "/api");
+
+/** URLs the API returns may be relative to the API (local storage mode: "/storage/…"); make them usable. */
+export function apiUrl(url: string): string {
+  return url.startsWith("/") ? `${API_URL}${url}` : url;
+}
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const isForm = init.body instanceof FormData;
@@ -71,7 +83,7 @@ export async function uploadFile(visitId: number, blob: Blob, kind: "photo" | "v
     contentType,
     kind,
   });
-  const res = await fetch(uploadUrl, { method: "PUT", body: blob, headers: { "Content-Type": contentType } });
+  const res = await fetch(apiUrl(uploadUrl), { method: "PUT", body: blob, headers: { "Content-Type": contentType } });
   if (!res.ok) throw new Error(`Upload failed (${res.status})`);
   return storageKey;
 }

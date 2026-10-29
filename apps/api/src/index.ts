@@ -11,9 +11,12 @@ import { askBacksRouter } from "./routes/ask-backs.js";
 import { assessmentsRouter } from "./routes/assessments.js";
 import { reportsRouter } from "./routes/reports.js";
 import { traceRouter } from "./routes/trace.js";
+import { storageRouter } from "./routes/storage.js";
+import { usingLocalStorage } from "./services/storage.js";
+import { isAllowedOrigin } from "./lib/origins.js";
 
 const app = express();
-app.use(cors({ origin: env.WEB_ORIGIN.split(",").map((s) => s.trim()) }));
+app.use(cors({ origin: (origin, cb) => cb(null, isAllowedOrigin(origin)) }));
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/health", (_req, res) => {
@@ -29,6 +32,7 @@ app.use(askBacksRouter);
 app.use(assessmentsRouter);
 app.use(reportsRouter);
 app.use(traceRouter);
+if (usingLocalStorage()) app.use(storageRouter); // stands in for R2 presigned URLs
 
 app.use(errorHandler);
 

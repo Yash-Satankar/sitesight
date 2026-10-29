@@ -75,7 +75,8 @@ export const PresignBody = z.object({
 });
 export type PresignBody = z.infer<typeof PresignBody>;
 
-export const PresignResponse = z.object({ uploadUrl: z.string().url(), storageKey: z.string() });
+// uploadUrl is absolute (R2) or relative to the API (local storage mode: "/storage/…").
+export const PresignResponse = z.object({ uploadUrl: z.string().min(1), storageKey: z.string() });
 export type PresignResponse = z.infer<typeof PresignResponse>;
 
 export const RegisterPhotoBody = z.object({

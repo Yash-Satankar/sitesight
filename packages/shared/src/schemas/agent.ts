@@ -153,7 +153,7 @@ export const ToolArgs = {
     confidence: z.number().min(0).max(1),
     rationale: z.string().min(1),
     evidence: z
-      .array(z.object({ photo_id: z.number().int(), segment_ids: z.array(z.number().int()) }))
+      .array(z.object({ photo_id: z.number().int(), segment_ids: z.array(z.number().int()).default([]).describe("Omit or [] for photo-only evidence.") }))
       .min(1),
     deviation: z.string().optional(),
   }),

@@ -111,7 +111,7 @@ await sql.end();`;
     });
     expect(res.stderr).toBe("");
     expect(JSON.parse(res.stdout.trim().split("\n").at(-1)!)).toEqual({ id: 1, panelRows: 0 });
-  });
+  }, 120_000); // child process + PGlite start-up is slow when the suite runs in parallel
 });
 
 describe("--visits from PowerShell", () => {

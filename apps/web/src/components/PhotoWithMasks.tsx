@@ -1,4 +1,5 @@
 import type { Photo } from "@sitesight/shared";
+import { apiUrl } from "../lib/api";
 
 /**
  * Shows a visit photo. Mask overlays are drawn server-side (overlay.ts) for the agent and the PDF;
@@ -9,7 +10,7 @@ export function PhotoWithMasks({ photo, segmentIds = [] }: { photo: Photo | unde
   return (
     <figure className="relative overflow-hidden rounded-lg bg-gray-100">
       {photo.url ? (
-        <img src={photo.url} alt={`Photo ${photo.id}`} className="h-auto w-full" loading="lazy" />
+        <img src={apiUrl(photo.url)} alt={`Photo ${photo.id}`} className="h-auto w-full" loading="lazy" />
       ) : (
         <div className="aspect-[4/3]" />
       )}

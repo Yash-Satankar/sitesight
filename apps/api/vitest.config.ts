@@ -3,7 +3,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
-    testTimeout: 30_000,
+    // Generous: many files start PGlite (WASM Postgres) or spawn tsx children in parallel, which is slow under load.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
     // Set before src/config.ts loads. Numbers are chosen so test costs are easy to reason about:
     // one Spark call = 200 in + 200 out tokens at $10/Mtok = $0.004; one SAM request = $0.0035; cap = $0.01.
     env: {
@@ -16,6 +18,8 @@ export default defineConfig({
       MAX_AGENT_STEPS: "10",
       SAM_CONCURRENCY: "3",
       MAX_IMAGES_IN_CONTEXT: "3",
+      // Do not inherit the developer's .env storage setting; tests that need local storage set it themselves.
+      STORAGE_LOCAL_DIR: "",
     },
   },
 });

@@ -21,22 +21,47 @@ Requires Node 20+, pnpm 10, and a Postgres database.
 
 ```sh
 pnpm install
-cp .env.example .env          # fill in META_*, R2_* (DATABASE_URL already points at the local container)
-docker compose up -d          # local Postgres on :5432
+cp .env.example .env          # fill in META_* and prices; R2_* or STORAGE_LOCAL_DIR (see below)
+docker compose up -d          # local Postgres on :5432 (or point DATABASE_URL at an existing Postgres)
 pnpm db:migrate               # apply migrations (after schema changes: pnpm db:generate first)
 pnpm seed                     # optional demo project
+pnpm seed --boq samples/boq-demo-residence.json --name "Demo Residence"   # or a project from a BOQ JSON
 ```
+
+No R2 account? Set `STORAGE_LOCAL_DIR=samples/out/storage` in `.env`. Photos, masks and reports are then stored as
+files, and the API serves short-lived signed `/storage/…` URLs for uploads and downloads in place of R2's.
 
 ## Run
 
 ```sh
 pnpm dev:api      # http://localhost:8787
 pnpm dev:worker   # polls the jobs table and runs the agent
-pnpm dev:web      # http://localhost:5173 (also exposed on your LAN for phone testing)
+pnpm dev:web      # http://localhost:5173, also on your LAN (prints the phone URL)
 ```
 
-Camera capture on a phone needs HTTPS (or localhost). For on-device testing use the deployed web app,
-or a tunnel such as `cloudflared tunnel --url http://localhost:5173`.
+In dev the web app calls `/api/*` and Vite proxies it to the API, so leave `VITE_API_URL` empty locally.
+
+### Testing on a phone
+
+1. Phone and computer on the same Wi-Fi. Run the API and worker as above.
+2. `pnpm dev:web:https` (self-signed HTTPS; most phones only allow camera capture over HTTPS). It prints
+   `Phone (same Wi-Fi): https://192.168.x.x:5173/`.
+3. Open that URL on the phone and accept the certificate warning once (it is a dev-only self-signed certificate).
+4. If the phone cannot connect, allow Node.js through the Windows firewall for private networks.
+
+The API accepts browser origins on private networks in dev (`ALLOW_LAN_ORIGINS`, off when `NODE_ENV=production`).
+
+## End-to-end smoke test
+
+```sh
+pnpm e2e-smoke          # defaults: --boq samples/boq-demo-residence.json --visits "samples/demo-residence/v1,samples/demo-residence/v2"
+```
+
+Starts the real API and worker (local file storage, port 8799) against your `DATABASE_URL`, then over HTTP: creates a
+project from the BOQ; for each visit uploads photos via presign + register, runs the agent, follows the live trace until
+assessed / needs input and accepts the assessments; finally generates the PDF for the last visit and prints its path.
+It stops at the first failing step with the API and worker log tails. Real Meta calls: up to `MAX_COST_PER_VISIT_USD`
+per visit.
 
 ## SAM spike
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, apiUrl } from "../lib/api";
 import { ErrorNote } from "../components/Layout";
 
 export function ReportPage() {
@@ -13,7 +13,7 @@ export function ReportPage() {
     setBusy(true);
     setError(null);
     try {
-      setUrl((await api.createReport(visitId)).downloadUrl);
+      setUrl(apiUrl((await api.createReport(visitId)).downloadUrl));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

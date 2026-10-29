@@ -18,7 +18,9 @@
     "sam-spike": "pnpm --filter @sitesight/api sam-spike",
     "spark-smoke": "pnpm --filter @sitesight/api spark-smoke",
     "test": "pnpm -r --if-present test",
-    "agent-dry-run": "pnpm --filter @sitesight/api agent-dry-run"
+    "agent-dry-run": "pnpm --filter @sitesight/api agent-dry-run",
+    "dev:web:https": "pnpm --filter @sitesight/web dev:https",
+    "e2e-smoke": "pnpm --filter @sitesight/api e2e-smoke"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

@@ -1,7 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../config.js";
@@ -16,6 +15,37 @@ function localPath(key: string): string | null {
   const path = resolve(root, key);
   if (!path.startsWith(root + sep)) throw new Error(`Storage key escapes STORAGE_LOCAL_DIR: ${key}`);
   return path;
+}
+
+/**
+ * Local mode: the API serves objects at /storage/<key> (routes/storage.ts). URLs are relative to the API and
+ * signed with a per-process secret, so only URLs this API handed out work, and only until they expire.
+ */
+const LOCAL_SECRET = randomBytes(32);
+
+function localSignature(key: string, method: "GET" | "PUT", expires: number): string {
+  return createHmac("sha256", LOCAL_SECRET).update([method, key, String(expires)].join("\n")).digest("base64url");
+}
+
+function localUrl(key: string, method: "GET" | "PUT", expiresIn: number): string {
+  const expires = Math.floor(Date.now() / 1000) + expiresIn;
+  const path = key.split("/").map(encodeURIComponent).join("/");
+  return `/storage/${path}?exp=${expires}&sig=${localSignature(key, method, expires)}`;
+}
+
+/** Check a /storage URL signature. Returns an error message, or null when valid. */
+export function verifyLocalUrl(key: string, method: "GET" | "PUT", exp: string | undefined, sig: string | undefined): string | null {
+  const expires = Number(exp);
+  if (!sig || !Number.isInteger(expires)) return "missing signature";
+  if (expires < Date.now() / 1000) return "link expired";
+  const expected = Buffer.from(localSignature(key, method, expires));
+  const given = Buffer.from(sig);
+  if (expected.length !== given.length || !timingSafeEqual(expected, given)) return "bad signature";
+  return null;
+}
+
+export function usingLocalStorage(): boolean {
+  return Boolean(env.STORAGE_LOCAL_DIR);
 }
 
 function s3(): S3Client {
@@ -47,15 +77,14 @@ export function newKey(prefix: string, contentType: string): string {
 }
 
 export async function presignPut(key: string, contentType: string, expiresIn = 600): Promise<string> {
-  if (localPath(key)) throw new Error("Browser uploads need R2; presigned PUT is not available with STORAGE_LOCAL_DIR.");
+  if (localPath(key)) return localUrl(key, "PUT", expiresIn);
   return getSignedUrl(s3(), new PutObjectCommand({ Bucket: env.R2_BUCKET, Key: key, ContentType: contentType }), {
     expiresIn,
   });
 }
 
 export async function presignGet(key: string, expiresIn = 3600): Promise<string> {
-  const local = localPath(key);
-  if (local) return pathToFileURL(local).href;
+  if (localPath(key)) return localUrl(key, "GET", expiresIn);
   return getSignedUrl(s3(), new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }), { expiresIn });
 }
 

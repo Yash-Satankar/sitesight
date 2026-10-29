@@ -44,7 +44,8 @@ import { systemPrompt } from "../src/agent/prompts.js";
 import { boqItemStatus } from "../src/lib/item-status.js";
 import { billLines, buildReport, type ReportItem } from "../src/services/report.js";
 import { assertAskBackOpenInProject, fulfilAskBack } from "../src/services/ask-backs.js";
-import { loadVisitDetail } from "../src/lib/queries.js";
+import { loadVisitDetail, openAskBacksForProject } from "../src/lib/queries.js";
+import { pendingItems } from "../src/lib/item-status.js";
 import { runDryRun } from "../scripts/dry-run.js";
 
 const db = mockedDb as unknown as PgliteDatabase<typeof schema>;
@@ -240,6 +241,32 @@ describe("visit detail lists open requests from earlier visits (Capture / Visit 
     const own = await loadVisitDetail(v1.id);
     expect(own.earlierOpenAskBacks).toEqual([]); // a visit's own requests are in askBacks, not repeated here
     expect(own.askBacks.map((a) => a.id)).toEqual([open, closed]);
+  });
+});
+
+describe("fixes from the e2e smoke run", () => {
+  it("the report's 'awaiting photo' list includes requests from earlier visits", async () => {
+    const { ctx1, v2, projectId, zoneId, footing, plinth } = await seed();
+    const ab = out(await run("request_photo", { zone_id: zoneId, boq_item_id: footing.id, instruction: "Square-on photo of footing F1", reason: "r" }, ctx1))
+      .ask_back_id as number;
+    const items = await db.select().from(schema.boqItems).where(eq(schema.boqItems.projectId, projectId));
+    // Visit 2 assessed neither item; the request was made in visit 1.
+    const pending = pendingItems(items, new Set<number>(), await openAskBacksForProject(projectId));
+    expect(pending).toEqual([expect.objectContaining({ code: "FTG-1", status: `awaiting photo (ask-back #${ab})` })]);
+    expect(pending.some((p) => p.code === plinth.code)).toBe(false);
+    void v2;
+  });
+
+  it("record_assessment accepts photo-only evidence without segment_ids", async () => {
+    const { ctx2, p2, plinth } = await seed();
+    const res = await run(
+      "record_assessment",
+      { boq_item_id: plinth.id, percent_complete: 100, confidence: 0.6, rationale: "cast", evidence: [{ photo_id: p2.id }] },
+      ctx2,
+    );
+    expect(out(res).error).toBeUndefined();
+    const ev = await db.select().from(schema.assessmentEvidence).where(eq(schema.assessmentEvidence.assessmentId, out(res).assessment_id as number));
+    expect(ev).toEqual([expect.objectContaining({ photoId: p2.id, segmentIds: [] })]);
   });
 });
 

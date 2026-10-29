@@ -19,7 +19,7 @@ function loadConfig(overrides: Record<string, string>) {
   return { code: res.status, stderr: res.stderr };
 }
 
-describe("price validation at startup", () => {
+describe("price validation at startup", { timeout: 120_000 }, () => {
   it("starts when all prices are positive", () => {
     expect(loadConfig({}).code).toBe(0);
   });
