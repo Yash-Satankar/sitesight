@@ -1,0 +1,9 @@
+{
+  "zones": ["Front"],
+  "items": [
+    { "code": "PB-1", "description": "RCC plinth beams", "unit": "lot", "plannedQty": 1, "measureMode": "visual_only", "segmentTargets": [], "sequenceNo": 1 },
+    { "code": "SLB-GF", "description": "Ground-floor roof slab, 125 mm RCC", "unit": "lot", "plannedQty": 1, "measureMode": "visual_only", "segmentTargets": [], "sequenceNo": 2,
+      "stages": [{ "name": "shuttering", "weight": 0.25 }, { "name": "reinforcement", "weight": 0.35 }, { "name": "concreting", "weight": 0.4 }] },
+    { "code": "BWK-FF", "description": "First-floor brick masonry walls", "unit": "lot", "plannedQty": 1, "measureMode": "visual_only", "segmentTargets": [], "sequenceNo": 3 }
+  ]
+}

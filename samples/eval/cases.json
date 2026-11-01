@@ -1,0 +1,61 @@
+{
+  "labels_note": "Draft labels written by Claude from the sample photos and the DEMO RESIDENCE drawings (2026-11-01). The site engineer should confirm or correct them; the drawing counts come from the request (12 columns, 10 footings, one G.F roof slab, 5\").",
+  "cases": [
+    {
+      "id": "demo-residence-v1-slab-mesh",
+      "kind": "photos",
+      "description": "Roof slab with bottom and top mesh tied over sheeted shuttering; starter bars sticking up.",
+      "photos": ["samples/demo-residence/v1/WhatsApp Image 2026-10-28 at 11.21.26 AM.jpeg"],
+      "boq": "samples/boq-demo-residence.json",
+      "expected": {
+        "SLB-GF": { "stage": "reinforcement", "basis": "observed" }
+      },
+      "should_reject": [{ "note": "starter bars / rebar sticking up are not cast columns", "keywords": ["rebar", "starter", "bar", "reinforcement", "steel"] }]
+    },
+    {
+      "id": "demo-residence-v2-slab-cast",
+      "kind": "photos",
+      "description": "Same slab, concreted and curing; two bamboo props in front, starter bars at the edge.",
+      "photos": ["samples/demo-residence/v2/WhatsApp Image 2026-10-28 at 11.21.45 AM.jpeg"],
+      "boq": "samples/boq-demo-residence.json",
+      "expected": {
+        "SLB-GF": { "stage": "concreting", "basis": "observed" }
+      },
+      "should_reject": [
+        { "note": "bamboo props are not columns", "keywords": ["bamboo", "prop", "pole", "scaffold"] },
+        { "note": "starter bars are not cast columns", "keywords": ["rebar", "starter", "bar", "steel"] }
+      ]
+    },
+    {
+      "id": "cages-no-cast-columns",
+      "kind": "photos",
+      "description": "Column rebar cages standing on cast plinth beams, concrete-block walls; no column is cast yet.",
+      "photos": ["samples/run2/WhatsApp Image 2026-10-24 at 3.35.51 PM (1).jpeg"],
+      "boq": "samples/eval/boq-cages.json",
+      "expected": {
+        "COL-GF": { "count": 0, "tolerance": 0 },
+        "PB-1": { "basis": "observed" }
+      },
+      "should_reject": [{ "note": "rebar cages are not cast columns", "keywords": ["rebar", "cage", "reinforcement", "steel", "not cast"] }]
+    },
+    {
+      "id": "frame-behind-scaffolding",
+      "kind": "photos",
+      "description": "G+2 frame with slabs cast, partial brickwork on upper floors, bamboo scaffolding in front; plinth hidden.",
+      "photos": ["samples/run1/WhatsApp Image 2026-10-24 at 3.35.50 PM (1).jpeg"],
+      "boq": "samples/eval/boq-frame.json",
+      "expected": {
+        "SLB-GF": { "stage": "concreting", "basis": "observed" },
+        "PB-1": { "basis": "inferred" }
+      },
+      "should_reject": [{ "note": "bamboo scaffolding poles are not columns", "keywords": ["bamboo", "scaffold", "pole"] }]
+    },
+    {
+      "id": "demo-residence-drawings",
+      "kind": "drawings",
+      "description": "demo-residence.pdf structural set.",
+      "pdf": "samples/demo-residence.pdf",
+      "expected": { "columns": 12, "footings": 10, "slabs": { "floor": "GF", "count": 1, "thickness": "5\"" } }
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "zones": ["GF"],
+  "items": [
+    { "code": "PB-1", "description": "RCC plinth beams, ground floor", "unit": "lot", "plannedQty": 1, "measureMode": "visual_only", "segmentTargets": [], "sequenceNo": 1 },
+    { "code": "COL-GF", "description": "RCC columns, ground floor (cast concrete)", "unit": "nos", "plannedQty": 14, "measureMode": "count", "segmentTargets": ["column"], "sequenceNo": 2 },
+    { "code": "WALL-GF", "description": "Ground-floor masonry walls", "unit": "lot", "plannedQty": 1, "measureMode": "visual_only", "segmentTargets": [], "sequenceNo": 3 }
+  ]
+}

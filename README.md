@@ -109,6 +109,24 @@ Dry run, without the database:
 pnpm boq-from-drawings --pdf drawings.pdf [--out samples/out/drawings] [--max-cost 0.50]
 ```
 
+## Evaluation
+
+`pnpm eval` runs labelled cases ([samples/eval/cases.json](samples/eval/cases.json)) through the real agent (photo cases,
+in-memory DB) and the drawing import (drawing cases), and scores them: stage exact-match, count within tolerance,
+evidence basis, drawing totals, how many SAM detections the agent rejected (and whether the labelled false positives
+were among them), consistency across runs, cost and latency. Report: `samples/out/eval/<time>/report.md` + `report.json`;
+the console ends with a table to paste here.
+
+```sh
+pnpm eval                 # every case once
+pnpm eval --runs 3        # consistency
+pnpm eval --only demo-residence-drawings
+pnpm eval --max-cost 5    # hard cap on Meta spend for the whole eval (default $10)
+```
+
+Each run's own cap is shrunk to what is left of `--max-cost`, so a run can overshoot it by at most one model call; runs
+are skipped once it is spent. The labels in `cases.json` are drafts to be confirmed by the site engineer.
+
 ## Deploying
 
 Railway (API + worker in one process, Postgres, a volume for files) and Vercel (web): see [DEPLOY.md](DEPLOY.md).

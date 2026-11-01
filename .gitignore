@@ -22,3 +22,7 @@ samples/*
 !samples/.gitkeep
 !samples/boq-demo.json
 !samples/boq-demo-residence.json
+# Evaluation cases and their small BOQs (the photos they point at stay untracked).
+!samples/eval/
+samples/eval/*
+!samples/eval/*.json
