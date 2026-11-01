@@ -170,13 +170,13 @@ describe("origins and errors", () => {
 });
 
 describe("daily spend guard", () => {
-  it("sums today's agent runs and drawing imports (UTC day) and refuses new work once the cap is reached", async () => {
+  it("sums today's spend ledger (UTC day) and refuses new work once the cap is reached", async () => {
     const yesterday = new Date(startOfUtcDay().getTime() - 3600 * 1000);
-    await db.insert(schema.agentRuns).values({ visitId: ids.visit, costUsd: 9, startedAt: yesterday }); // not today
-    await db.insert(schema.agentRuns).values({ visitId: ids.visit, costUsd: 0.02, status: "finished" });
+    await db.insert(schema.spendLedger).values({ kind: "agent_run", visitId: ids.visit, projectId: ids.project, costUsd: 9, at: yesterday }); // not today
+    await db.insert(schema.spendLedger).values({ kind: "agent_run", visitId: ids.visit, projectId: ids.project, costUsd: 0.02 });
     expect((await call("GET", "/spend/today", { cookie })).body).toMatchObject({ spentUsd: 0.02, capUsd: 0.05, remainingUsd: 0.03 });
 
-    await db.insert(schema.drawingImports).values({ projectId: ids.project, fileName: "a.pdf", costUsd: 0.03, status: "done" });
+    await db.insert(schema.spendLedger).values({ kind: "drawing_import", projectId: ids.project, costUsd: 0.03 });
     const spend = await dailySpend();
     expect(spend).toMatchObject({ spentUsd: 0.05, remainingUsd: 0 });
     expect(spend.resetsAt).toBe(new Date(startOfUtcDay().getTime() + 86_400_000).toISOString());

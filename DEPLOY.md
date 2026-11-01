@@ -84,7 +84,7 @@ Startup log on success:
 | `DEMO_PASSWORD` | random passphrase | Login screen; 7-day sessions. Changing it logs everyone out. |
 | `SESSION_SECRET` | random | Optional but recommended: part of the login-cookie key. |
 | `STORAGE_SIGNING_SECRET` | random | Optional but recommended: signs storage URLs so they survive restarts. |
-| `DAILY_SPEND_CAP_USD` | `5` | Meta spend per UTC day across all visits and drawing imports. |
+| `DAILY_SPEND_CAP_USD` | `5` | Meta spend per UTC day from the spend ledger (agent runs, drawing imports, spreadsheet BOQ parses; kept when projects are deleted). |
 | `META_API_KEY`, `META_BASE_URL` | — | Meta Model API. |
 | `SPARK_MODEL`, `SAM_MODEL`, `VOICE_MODEL` | `muse-spark-1.3`, `sam-3.1`, `muse-voice-transcribe-1.0` | Never a `-contributor` variant. |
 | `SPARK_INPUT_USD_PER_MTOK`, `SPARK_OUTPUT_USD_PER_MTOK`, `SAM_USD_PER_IMAGE` | `1.25`, `4.25`, `0.0025` | Required, > 0. |

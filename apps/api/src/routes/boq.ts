@@ -7,17 +7,21 @@ import { HttpError, intParam, notFound, parse } from "../lib/http.js";
 import { parseBoq } from "../services/boq-parser.js";
 import { boqItemProblem } from "../services/boq-rules.js";
 import { assertDailyBudget } from "../lib/spend.js";
+import { recordSpend } from "../meta/cost.js";
 
 export const boqRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 /** Parse an uploaded .xlsx and return items for review. Nothing is saved yet. */
 boqRouter.post("/projects/:id/boq", upload.single("file"), async (req, res) => {
-  intParam(req.params.id);
+  const projectId = intParam(req.params.id);
   if (!req.file) throw new HttpError(400, 'Upload the .xlsx as multipart field "file"');
   if (!/\.xlsx$/i.test(req.file.originalname)) throw new HttpError(400, "Only .xlsx files are supported");
   await assertDailyBudget(); // parsing calls Muse Spark
-  const result: ParsedBoqResponse = await parseBoq(req.file.buffer);
+  // Parsing calls Muse Spark: every call goes to the spend ledger (counts toward the daily cap).
+  const result: ParsedBoqResponse = await parseBoq(req.file.buffer, {
+    meter: { beforeCall: () => {}, record: (u) => recordSpend({ kind: "boq_parse", costUsd: u.costUsd, projectId }) },
+  });
   res.json(result);
 });
 

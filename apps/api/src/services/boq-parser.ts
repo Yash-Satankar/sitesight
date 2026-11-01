@@ -1,13 +1,13 @@
 import ExcelJS from "exceljs";
 import { BoqParseResult, type BoqItemInput } from "@sitesight/shared";
-import { respondJson } from "../meta/spark.js";
+import { respondJson, type CostMeter } from "../meta/spark.js";
 import { BOQ_PARSE_INSTRUCTIONS } from "../agent/prompts.js";
 import { normalizeBoqItem } from "./boq-rules.js";
 
 const ROWS_PER_CHUNK = 80;
 
 /** xlsx → raw rows → Muse Spark → validated BoqItemInput[] for the engineer to review. */
-export async function parseBoq(xlsx: Buffer): Promise<{ items: BoqItemInput[]; warnings: string[] }> {
+export async function parseBoq(xlsx: Buffer, opts: { meter?: CostMeter } = {}): Promise<{ items: BoqItemInput[]; warnings: string[] }> {
   const rows = await readRows(xlsx);
   if (rows.length === 0) return { items: [], warnings: ["No rows found in the workbook."] };
 
@@ -16,7 +16,7 @@ export async function parseBoq(xlsx: Buffer): Promise<{ items: BoqItemInput[]; w
   for (let i = 0; i < rows.length; i += ROWS_PER_CHUNK) {
     const chunk = rows.slice(i, i + ROWS_PER_CHUNK);
     const text = chunk.map((r) => r.join(" | ")).join("\n");
-    const result = await respondJson(BoqParseResult, BOQ_PARSE_INSTRUCTIONS, text);
+    const result = await respondJson(BoqParseResult, BOQ_PARSE_INSTRUCTIONS, text, { meter: opts.meter });
     warnings.push(...result.warnings);
     for (const raw of result.items) {
       // The model sometimes asks to segment things SAM cannot find reliably; fall back to visual_only.

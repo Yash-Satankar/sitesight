@@ -79,11 +79,14 @@ export async function respondJson<S extends z.ZodTypeAny>(
   schema: S,
   instructions: string,
   userText: string,
+  opts: { meter?: CostMeter } = {},
 ): Promise<z.output<S>> {
   const input: SparkInputItem[] = [{ role: "user", content: userText }];
   let lastError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
+    await opts.meter?.beforeCall();
     const resp = await respond({ instructions, input });
+    await opts.meter?.record(estimateCost(resp));
     const text = resp.output_text ?? "";
     const parsed = schema.safeParse(extractJson(text));
     if (parsed.success) return parsed.data;

@@ -17,7 +17,26 @@ export interface CostEntry {
   costUsd: number;
 }
 
-/** Add one model call's cost to agent_runs, then enforce the per-visit cap (throws CostLimitError). */
+export type SpendKind = "agent_run" | "drawing_import" | "boq_parse";
+
+/**
+ * Append one cost to the spend ledger (survives project deletion; the daily cap reads it). Zero costs are skipped.
+ */
+export async function recordSpend(entry: { kind: SpendKind; costUsd: number; projectId?: number | null; visitId?: number | null }): Promise<void> {
+  if (!(entry.costUsd > 0)) return;
+  const { db, schema } = await import("../db/client.js");
+  await db.insert(schema.spendLedger).values({
+    kind: entry.kind,
+    costUsd: entry.costUsd,
+    projectId: entry.projectId ?? null,
+    visitId: entry.visitId ?? null,
+  });
+}
+
+/**
+ * Add one model call's cost to agent_runs and the spend ledger, then enforce the per-visit cap (throws
+ * CostLimitError).
+ */
 export async function addRunCost(runId: number, entry: CostEntry): Promise<void> {
   const { db, schema } = await import("../db/client.js");
   const [run] = await db
@@ -29,7 +48,10 @@ export async function addRunCost(runId: number, entry: CostEntry): Promise<void>
     })
     .where(eq(schema.agentRuns.id, runId))
     .returning({ visitId: schema.agentRuns.visitId });
-  if (run) await assertWithinBudget(run.visitId);
+  if (!run) return;
+  const [visit] = await db.select({ projectId: schema.visits.projectId }).from(schema.visits).where(eq(schema.visits.id, run.visitId));
+  await recordSpend({ kind: "agent_run", costUsd: entry.costUsd, projectId: visit?.projectId ?? null, visitId: run.visitId });
+  await assertWithinBudget(run.visitId);
 }
 
 /** Total spend across all agent runs of a visit. */

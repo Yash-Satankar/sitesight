@@ -7,6 +7,7 @@ import { db, schema } from "../../db/client.js";
 import { enqueue } from "../jobs.js";
 import { getObject, newKey, presignGet, putObject } from "../storage.js";
 import { assembleProposal, runActions } from "./assemble.js";
+import { recordSpend } from "../../meta/cost.js";
 import { ImportCostMeter } from "./cost.js";
 import { rasterizePdf } from "./rasterize.js";
 import { isStructural, runPipeline, type PageState } from "./pipeline.js";
@@ -56,6 +57,7 @@ export async function runDrawingImport(importId: number): Promise<DrawingImport[
         outputTokens: dsql`${schema.drawingImports.outputTokens} + ${u.outputTokens}`,
       })
       .where(eq(schema.drawingImports.id, importId));
+    await recordSpend({ kind: "drawing_import", costUsd: u.costUsd, projectId: imp.projectId });
   });
 
   const { stoppedByCost } = await runPipeline(

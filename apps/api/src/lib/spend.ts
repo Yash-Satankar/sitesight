@@ -1,7 +1,8 @@
 /**
- * Public-demo spend guard: Meta spend today (UTC) across every agent run and drawing import, against
- * DAILY_SPEND_CAP_USD. Once reached, new agent runs, resumes and drawing imports are refused until midnight UTC.
- * A run is counted on the day it started; runs already going finish (each still has its own per-visit cap).
+ * Public-demo spend guard: Meta spend today (UTC) from the spend ledger (agent runs, drawing imports, spreadsheet
+ * BOQ parses; one row per call, kept when projects are deleted), against DAILY_SPEND_CAP_USD. Once reached, new
+ * agent runs, resumes, drawing imports and BOQ parses are refused until midnight UTC; runs already going finish
+ * (each still has its own per-visit / per-import cap).
  */
 import { gte, sql as dsql } from "drizzle-orm";
 import { env } from "../config.js";
@@ -22,15 +23,12 @@ export interface DailySpend {
 
 export async function dailySpend(now = new Date()): Promise<DailySpend> {
   const since = startOfUtcDay(now);
-  const [runs] = await db
-    .select({ s: dsql<string>`coalesce(sum(${schema.agentRuns.costUsd}), 0)` })
-    .from(schema.agentRuns)
-    .where(gte(schema.agentRuns.startedAt, since));
-  const [imports] = await db
-    .select({ s: dsql<string>`coalesce(sum(${schema.drawingImports.costUsd}), 0)` })
-    .from(schema.drawingImports)
-    .where(gte(schema.drawingImports.createdAt, since));
-  const spentUsd = Math.round((Number(runs?.s ?? 0) + Number(imports?.s ?? 0)) * 10000) / 10000;
+  // The append-only ledger: one row per model call, kept even when a project is deleted.
+  const [row] = await db
+    .select({ s: dsql<string>`coalesce(sum(${schema.spendLedger.costUsd}), 0)` })
+    .from(schema.spendLedger)
+    .where(gte(schema.spendLedger.at, since));
+  const spentUsd = Math.round(Number(row?.s ?? 0) * 10000) / 10000;
   return {
     spentUsd,
     capUsd: env.DAILY_SPEND_CAP_USD,

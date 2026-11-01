@@ -311,3 +311,20 @@ export const drawingPages = pgTable(
   },
   (t) => [index("drawing_pages_import_idx").on(t.importId, t.pageNo)],
 );
+
+/**
+ * Append-only record of every Meta model cost (one row per model call or SAM request). Deliberately has NO foreign
+ * keys: deleting a project or visit must not erase what was spent. The daily spend cap reads this table.
+ */
+export const spendLedger = pgTable(
+  "spend_ledger",
+  {
+    id: serial("id").primaryKey(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    kind: text("kind", { enum: ["agent_run", "drawing_import", "boq_parse"] }).notNull(),
+    projectId: integer("project_id"),
+    visitId: integer("visit_id"),
+    costUsd: numeric("cost_usd", { mode: "number" }).notNull(),
+  },
+  (t) => [index("spend_ledger_at_idx").on(t.at)],
+);

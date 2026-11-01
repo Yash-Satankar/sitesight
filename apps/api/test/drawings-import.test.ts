@@ -255,6 +255,10 @@ describe("POST /projects/:id/drawings + import job", () => {
     const imp = await (await fetch(`${base}/projects/${projectId}/drawings/${body.id}`)).json();
     expect(imp.status).toBe("done");
     expect(imp.costUsd).toBeCloseTo(0.02); // 5 calls × $0.004
+    // …and each call is in the spend ledger, against the project.
+    const rows = (await db.select().from(schema.spendLedger)).filter((r) => r.kind === "drawing_import" && r.projectId === projectId);
+    expect(rows.length).toBeGreaterThanOrEqual(5);
+    expect(rows.reduce((sum, r) => sum + r.costUsd, 0)).toBeGreaterThanOrEqual(0.02 - 1e-9);
     expect(imp.pages.map((p: { status: string; sheetType: string }) => [p.status, p.sheetType])).toEqual([
       ["extracted", "column_layout"],
       ["extracted", "footing_column_schedule"],

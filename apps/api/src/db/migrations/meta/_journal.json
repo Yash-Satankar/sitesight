@@ -64,6 +64,13 @@
       "when": 1793268433177,
       "tag": "0008_slippery_wong",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793548266403,
+      "tag": "0009_many_millenium_guard",
+      "breakpoints": true
     }
   ]
 }
