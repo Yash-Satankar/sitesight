@@ -3,6 +3,7 @@ import { db, schema } from "../db/client.js";
 import { HttpError, notFound } from "../lib/http.js";
 import { countOpenAskBacks, getVisitOr404 } from "../lib/queries.js";
 import { queueAgentRun } from "./jobs.js";
+import { overDailyCap } from "../lib/spend.js";
 
 export interface AskBackResolution {
   status: "fulfilled" | "skipped";
@@ -62,6 +63,11 @@ export async function assertAskBackOpenInProject(askBackId: number, visitId: num
 async function resumeIfReady(visitId: number): Promise<boolean> {
   const visit = await getVisitOr404(visitId);
   if (visit.status !== "needs_input" || (await countOpenAskBacks(visitId)) > 0) return false;
+  // Daily demo budget used up: don't start a new run; leave the visit reviewable so it can be re-run tomorrow.
+  if (await overDailyCap()) {
+    await db.update(schema.visits).set({ status: "assessed" }).where(and(eq(schema.visits.id, visitId), eq(schema.visits.status, "needs_input")));
+    return false;
+  }
   await queueAgentRun(visitId);
   return true;
 }

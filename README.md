@@ -109,6 +109,10 @@ Dry run, without the database:
 pnpm boq-from-drawings --pdf drawings.pdf [--out samples/out/drawings] [--max-cost 0.50]
 ```
 
+## Deploying
+
+Railway (API + worker in one process, Postgres, a volume for files) and Vercel (web): see [DEPLOY.md](DEPLOY.md).
+
 ## Rules
 
 - Nothing outside `apps/api/src/meta/` imports the `openai` SDK.

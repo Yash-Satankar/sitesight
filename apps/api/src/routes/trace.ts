@@ -19,7 +19,8 @@ traceRouter.get("/visits/:id/trace", async (req, res) => {
   const visitId = intParam(req.params.id);
   await getVisitOr404(visitId);
 
-  res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+  // X-Accel-Buffering: proxies in front of the API (Vercel rewrite, nginx) must not buffer the stream.
+  res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
   res.flushHeaders();
 
   let lastId = Number(req.get("Last-Event-ID") ?? req.query.after ?? 0) || 0;

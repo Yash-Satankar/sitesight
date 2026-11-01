@@ -5,6 +5,7 @@ import { db, schema } from "../db/client.js";
 import { HttpError, intParam, notFound, parse } from "../lib/http.js";
 import { countOpenAskBacks, getVisitOr404, loadVisitDetail, toVisitSummary } from "../lib/queries.js";
 import { queueAgentRun } from "../services/jobs.js";
+import { assertDailyBudget } from "../lib/spend.js";
 
 export const visitsRouter = Router();
 
@@ -31,6 +32,7 @@ visitsRouter.post("/visits/:id/run", async (req, res) => {
   if ((await countOpenAskBacks(visitId)) > 0) throw new HttpError(409, "Resolve open photo requests first");
   const photos = await db.select({ id: schema.photos.id }).from(schema.photos).where(eq(schema.photos.visitId, visitId));
   if (!photos.length) throw new HttpError(400, "Upload at least one photo first");
+  await assertDailyBudget();
 
   await queueAgentRun(visitId);
   res.status(202).json({ status: "queued" });

@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Building2, CalendarDays, Camera, ChevronRight, MapPin, Plus, TriangleAlert, X } from "lucide-react";
-import { api } from "../lib/api";
+import { Building2, CalendarDays, Camera, ChevronRight, MapPin, Plus, TriangleAlert, Wallet, X } from "lucide-react";
+import { api, type DailySpend } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { ErrorNote } from "../components/Layout";
-import { BottomBar, BottomBarSpacer, EmptyState, Loading, ProgressRing, fmtDate } from "../components/ui";
+import { BottomBar, BottomBarSpacer, EmptyState, Loading, ProgressBar, ProgressRing, fmtDate } from "../components/ui";
 
 export function ProjectsPage() {
   const { data: projects, error, loading } = useAsync(() => api.listProjects(), []);
+  const { data: spend } = useAsync(() => api.todaySpend(), []);
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
@@ -28,6 +29,7 @@ export function ProjectsPage() {
     <div className="grid gap-6 md:grid-cols-[1fr_20rem]">
       <section className="min-w-0">
         <h1 className="mb-3 text-2xl font-bold">Projects</h1>
+        {spend && <SpendToday spend={spend} />}
         <ErrorNote error={error} />
         {loading && !projects && <Loading />}
         <ul className="space-y-3">
@@ -102,5 +104,26 @@ export function ProjectsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Today's Meta spend for the public demo, against the daily cap (resets at midnight UTC). */
+function SpendToday({ spend }: { spend: DailySpend }) {
+  const used = spend.capUsd ? Math.min(100, (spend.spentUsd / spend.capUsd) * 100) : 0;
+  const out = spend.remainingUsd <= 0;
+  const near = !out && used >= 80;
+  return (
+    <section className={`mb-4 rounded-2xl border px-4 py-3 ${out ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"}`} aria-label="Today's AI spend">
+      <div className="flex items-center gap-2 text-sm">
+        <Wallet className={`h-4 w-4 shrink-0 ${out ? "text-amber-700" : "text-slate-500"}`} aria-hidden />
+        <span className="font-semibold">AI spend today</span>
+        <span className="num ml-auto">
+          <strong>${spend.spentUsd.toFixed(2)}</strong>
+          <span className="text-slate-600"> of ${spend.capUsd.toFixed(2)}</span>
+        </span>
+      </div>
+      <ProgressBar pct={used} tone={out || near ? "attention" : "busy"} className="mt-2" />
+      {out && <p className="mt-2 text-sm font-medium text-amber-950">Today's demo budget is used up. New agent runs and drawing imports resume at midnight UTC.</p>}
+    </section>
   );
 }

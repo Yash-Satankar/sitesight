@@ -27,11 +27,24 @@ export function notFound(what: string): never {
   throw new HttpError(404, `${what} not found`);
 }
 
-export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+/**
+ * JSON errors only, never stack traces. Body-parser errors (bad JSON, too large) keep their 4xx status.
+ * In production an unexpected error's message is logged but not returned (it can name internals).
+ */
+export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
+  if (res.headersSent) return void res.end();
   if (err instanceof HttpError) {
     res.status(err.status).json({ error: err.message, details: err.details });
     return;
   }
-  console.error(err);
-  res.status(500).json({ error: err instanceof Error ? err.message : "Internal error" });
+  const status = typeof err?.status === "number" && err.status >= 400 && err.status < 500 ? err.status : 500;
+  if (status < 500) {
+    const message =
+      err?.type === "entity.too.large" ? "Request body too large" : err?.type === "entity.parse.failed" ? "Invalid JSON body" : "Bad request";
+    res.status(status).json({ error: message });
+    return;
+  }
+  console.error(`[api] ${req.method} ${req.path}:`, err);
+  const production = process.env.NODE_ENV === "production";
+  res.status(500).json({ error: production || !(err instanceof Error) ? "Something went wrong on the server." : err.message });
 };

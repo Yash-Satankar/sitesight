@@ -54,7 +54,8 @@ export function VisitPage() {
   const awaitingItems = new Set([...openAskBacks, ...visit.earlierOpenAskBacks].map((a) => a.boqItemId));
   const status = liveStatus ?? visit.status;
   const busy = status === "queued" || status === "processing";
-  const canRun = visit.status === "draft" || visit.status === "assessed" || visit.status === "reviewed";
+  const canRun =
+    visit.status === "draft" || visit.status === "assessed" || visit.status === "reviewed" || (visit.status === "needs_input" && openAskBacks.length === 0);
   const toReview = visit.assessments.filter((a) => a.status === "proposed").length;
 
   async function run() {

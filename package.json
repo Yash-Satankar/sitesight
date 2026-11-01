@@ -23,7 +23,8 @@
     "e2e-smoke": "pnpm --filter @sitesight/api e2e-smoke",
     "db:purge-e2e": "pnpm --filter @sitesight/api db:purge-e2e",
     "ui-shots": "pnpm --filter @sitesight/web ui-shots",
-    "boq-from-drawings": "pnpm --filter @sitesight/api boq-from-drawings"
+    "boq-from-drawings": "pnpm --filter @sitesight/api boq-from-drawings",
+    "start:prod": "pnpm --filter @sitesight/api start:prod"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

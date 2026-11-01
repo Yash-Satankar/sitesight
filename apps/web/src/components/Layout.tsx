@@ -1,25 +1,28 @@
 import { isRouteErrorResponse, Link, Outlet, useLocation, useRouteError } from "react-router-dom";
 import { XCircle } from "lucide-react";
+import { AuthGate } from "./AuthGate";
 
 export function Layout() {
   const home = useLocation().pathname === "/";
   return (
-    <div className="min-h-dvh">
-      {home && (
-        <header className="border-b border-slate-200 bg-white">
-          <div className="mx-auto flex min-h-14 max-w-5xl items-center gap-3 px-4 sm:px-6">
-            <Link to="/" className="flex items-center gap-2 text-lg font-bold">
-              <img src="/icon.svg" alt="" className="h-8 w-8" />
-              SiteSight
-            </Link>
-            <span className="hidden text-sm text-slate-600 sm:inline">AI site-progress auditor</span>
-          </div>
-        </header>
-      )}
-      <main className={`mx-auto max-w-5xl px-4 sm:px-6 ${home ? "py-5" : "pb-6"}`}>
-        <Outlet />
-      </main>
-    </div>
+    <AuthGate>
+      <div className="min-h-dvh">
+        {home && (
+          <header className="border-b border-slate-200 bg-white">
+            <div className="mx-auto flex min-h-14 max-w-5xl items-center gap-3 px-4 sm:px-6">
+              <Link to="/" className="flex items-center gap-2 text-lg font-bold">
+                <img src="/icon.svg" alt="" className="h-8 w-8" />
+                SiteSight
+              </Link>
+              <span className="hidden text-sm text-slate-600 sm:inline">AI site-progress auditor</span>
+            </div>
+          </header>
+        )}
+        <main className={`mx-auto max-w-5xl px-4 sm:px-6 ${home ? "py-5" : "pb-6"}`}>
+          <Outlet />
+        </main>
+      </div>
+    </AuthGate>
   );
 }
 

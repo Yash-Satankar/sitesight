@@ -34,7 +34,18 @@ const Env = z.object({
   DRAWING_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(3), // parallel Spark calls per import
 
   // Infra
+  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.coerce.number().int().default(8787),
+  // Public base URL of this API as browsers reach it (e.g. https://sitesight-api.up.railway.app). Signed /storage
+  // URLs are made absolute with it; without it they are relative to the API (local dev through the Vite proxy).
+  PUBLIC_API_URL: z
+    .string()
+    .default("")
+    .transform((v) => v.trim().replace(/\/+$/, "")),
+  // Public demo: when set, every route except /healthz, /auth/* and signed /storage URLs needs the password cookie.
+  DEMO_PASSWORD: z.string().default(""),
+  // Spend guard across all visits and drawing imports, per UTC day. New runs/imports are refused once reached.
+  DAILY_SPEND_CAP_USD: z.coerce.number().positive().default(5),
   DATABASE_URL: z.string().default(""), // checked in db/client.ts so scripts without a DB can still run
   R2_ACCOUNT_ID: z.string().default(""),
   R2_ACCESS_KEY_ID: z.string().default(""),

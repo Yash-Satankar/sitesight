@@ -33,6 +33,16 @@ export function apiUrl(url: string): string {
   return url.startsWith("/") ? `${API_URL}${url}` : url;
 }
 
+/** Fired when the API says the demo needs a login (401 with authRequired). */
+export const UNAUTHORIZED_EVENT = "sitesight:unauthorized";
+
+export interface DailySpend {
+  spentUsd: number;
+  capUsd: number;
+  remainingUsd: number;
+  resetsAt: string;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const isForm = init.body instanceof FormData;
   const res = await fetch(`${API_URL}${path}`, {
@@ -41,6 +51,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
+    // The demo password gate: let the app show the login screen.
+    if (res.status === 401 && err.authRequired) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     throw new Error(err.error ?? `Request failed (${res.status})`);
   }
   return res.json() as Promise<T>;
@@ -50,6 +62,11 @@ const post = <T>(path: string, body?: unknown) =>
   request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
 
 export const api = {
+  me: () => request<{ authRequired: boolean; authenticated: boolean }>("/auth/me"),
+  login: (password: string) => post<{ ok: true }>("/auth/login", { password }),
+  logout: () => post<{ ok: true }>("/auth/logout"),
+  todaySpend: () => request<DailySpend>("/spend/today"),
+
   listProjects: () => request<ProjectListItem[]>("/projects"),
   createProject: (body: CreateProjectBody) => post<Project>("/projects", body),
   getProject: (id: number) => request<ProjectDetail>(`/projects/${id}`),

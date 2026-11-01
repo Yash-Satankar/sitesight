@@ -5,6 +5,7 @@ import { db, schema } from "../db/client.js";
 import { HttpError, intParam, notFound } from "../lib/http.js";
 import { createDrawingImport, DRAWING_MAX_BYTES, loadDrawingImport } from "../services/drawings/imports.js";
 import { PdfError } from "../services/drawings/rasterize.js";
+import { assertDailyBudget } from "../lib/spend.js";
 
 export const drawingsRouter = Router();
 
@@ -23,6 +24,7 @@ drawingsRouter.post("/projects/:id/drawings", upload, async (req, res) => {
   if (!p) notFound("Project");
   if (!req.file) throw new HttpError(400, 'Upload the PDF as multipart field "file"');
   if (req.file.buffer.subarray(0, 5).toString("latin1") !== "%PDF-") throw new HttpError(400, "Only PDF drawings are supported");
+  await assertDailyBudget();
   let importId: number;
   try {
     importId = await createDrawingImport(projectId, req.file.originalname, req.file.buffer);

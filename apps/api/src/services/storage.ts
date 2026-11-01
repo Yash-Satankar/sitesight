@@ -30,7 +30,8 @@ function localSignature(key: string, method: "GET" | "PUT", expires: number): st
 function localUrl(key: string, method: "GET" | "PUT", expiresIn: number): string {
   const expires = Math.floor(Date.now() / 1000) + expiresIn;
   const path = key.split("/").map(encodeURIComponent).join("/");
-  return `/storage/${path}?exp=${expires}&sig=${localSignature(key, method, expires)}`;
+  // Absolute with PUBLIC_API_URL (deployed: browsers fetch straight from the API); relative otherwise (dev proxy).
+  return `${env.PUBLIC_API_URL}/storage/${path}?exp=${expires}&sig=${localSignature(key, method, expires)}`;
 }
 
 /** Check a /storage URL signature. Returns an error message, or null when valid. */

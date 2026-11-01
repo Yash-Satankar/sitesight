@@ -430,7 +430,9 @@ async function main() {
   // A photo to upload on the capture screen (proves the strip refreshes with the real thumbnail).
   const uploadFile = join(outDir, "upload.jpg");
   await writeFile(uploadFile, (await demoImages(3))[2]!);
-  const screens: { name: string; path: string; ready: string; act?: (page: import("playwright").Page) => Promise<void> }[] = [
+  // The demo password gate is read per request, so it can be switched on just for the login screen.
+  const { env: apiEnv } = await import("../../api/src/config.js");
+  const screens: { name: string; path: string; ready: string; act?: (page: import("playwright").Page) => Promise<void>; gate?: boolean }[] = [
     { name: "01-projects", path: "/", ready: "text=Demo Residence" },
     { name: "02-project", path: `/projects/${ids.projectId}`, ready: "text=SLB-GF" },
     { name: "03-project-empty", path: `/projects/${ids.emptyProjectId}`, ready: "text=Patel Warehouse" },
@@ -451,6 +453,7 @@ async function main() {
     { name: "08-visit-running", path: `/visits/${ids.v3}`, ready: "text=columns" },
     { name: "09-review", path: `/visits/${ids.v2}/review`, ready: "text=SLB-GF" },
     { name: "10-report", path: `/visits/${ids.v2}/report`, ready: "main" },
+    { name: "14-login", path: "/", ready: "text=Demo access", gate: true },
     { name: "11-drawings-progress", path: `/projects/${ids.emptyProjectId}/boq?import=${ids.runningImport}`, ready: "text=Reading values" },
     { name: "12-drawings-proposal", path: `/projects/${ids.emptyProjectId}/boq?import=${ids.doneImport}`, ready: "text=Proposed BOQ" },
     {
@@ -475,6 +478,7 @@ async function main() {
     const page = await ctx.newPage();
     page.on("pageerror", (e) => console.warn(`  [page error] ${e.message}`));
     for (const s of screens.filter((x) => !only || only.some((o) => x.name.includes(o)))) {
+      apiEnv.DEMO_PASSWORD = s.gate ? "demo-password" : "";
       await page.goto(`${WEB}${s.path}`);
       try {
         await page.locator(s.ready).first().waitFor({ timeout: 15_000 });
