@@ -40,6 +40,8 @@ WEB_ORIGIN=https://${{RAILWAY_PUBLIC_DOMAIN}}
 PUBLIC_API_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}/api
 ALLOW_LAN_ORIGINS=false
 DEMO_PASSWORD=<a long random passphrase>
+SESSION_SECRET=<random, e.g. openssl rand -base64 48>
+STORAGE_SIGNING_SECRET=<random, e.g. openssl rand -base64 48>
 DAILY_SPEND_CAP_USD=5
 
 META_API_KEY=<from the Meta dashboard>
@@ -52,8 +54,9 @@ SPARK_OUTPUT_USD_PER_MTOK=4.25
 SAM_USD_PER_IMAGE=0.0025
 ```
 
-`PORT` is set by Railway. The login cookie is signed with a key derived from `DEMO_PASSWORD`, and signed storage URLs
-with a per-process key, so no separate secrets are needed.
+`PORT` is set by Railway. The login cookie is signed with a key derived from `SESSION_SECRET` and `DEMO_PASSWORD`
+(changing either logs everyone out). Signed storage URLs use `STORAGE_SIGNING_SECRET`, so links keep working across
+restarts; without it a per-process key is used and links expire at every redeploy.
 
 The service refuses to start (the deploy log says why) when `DATABASE_URL` isn't Postgres, there's no volume
 (`STORAGE_LOCAL_DIR`) or R2, `WEB_ORIGIN` isn't `https://<host>`, `PUBLIC_API_URL` isn't `<WEB_ORIGIN>/api`,
@@ -79,6 +82,8 @@ Startup log on success:
 | `PUBLIC_API_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}/api` | Base of signed storage URLs: the origin + `/api`. |
 | `ALLOW_LAN_ORIGINS` | `false` | Must stay false. |
 | `DEMO_PASSWORD` | random passphrase | Login screen; 7-day sessions. Changing it logs everyone out. |
+| `SESSION_SECRET` | random | Optional but recommended: part of the login-cookie key. |
+| `STORAGE_SIGNING_SECRET` | random | Optional but recommended: signs storage URLs so they survive restarts. |
 | `DAILY_SPEND_CAP_USD` | `5` | Meta spend per UTC day across all visits and drawing imports. |
 | `META_API_KEY`, `META_BASE_URL` | — | Meta Model API. |
 | `SPARK_MODEL`, `SAM_MODEL`, `VOICE_MODEL` | `muse-spark-1.3`, `sam-3.1`, `muse-voice-transcribe-1.0` | Never a `-contributor` variant. |
@@ -100,8 +105,8 @@ Startup log on success:
 
 ## Troubleshooting
 
-- **403 "Storage URL rejected"**: signed URLs expire (1 h views, 10 min uploads) and are tied to the running process;
-  reload the page after a redeploy.
+- **403 "Storage URL rejected"**: signed URLs expire (1 h views, 10 min uploads); without `STORAGE_SIGNING_SECRET`
+  they also stop working at every redeploy. Reload the page.
 - **"Origin not allowed"**: `WEB_ORIGIN` must be exactly `https://<domain>`.
 - **"Today's demo budget is used up"**: `DAILY_SPEND_CAP_USD` reached; resets at midnight UTC.
 - **Local development** is unchanged: `pnpm dev:api`, `pnpm dev:worker`, `pnpm dev:web` (README).

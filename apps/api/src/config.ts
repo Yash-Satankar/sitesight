@@ -44,6 +44,11 @@ const Env = z.object({
     .transform((v) => v.trim().replace(/\/+$/, "")),
   // Built web app served by the API in production (one service). Default: apps/web/dist in this repo.
   WEB_DIST_DIR: z.string().default(""),
+  // Optional secrets. SESSION_SECRET is mixed into the login-cookie key (with DEMO_PASSWORD, so a password change
+  // still logs everyone out). STORAGE_SIGNING_SECRET signs /storage URLs; without it a random per-process key is used
+  // and links handed out before a restart stop working.
+  SESSION_SECRET: z.string().default(""),
+  STORAGE_SIGNING_SECRET: z.string().default(""),
   // Public demo: when set, every route except /healthz, /auth/* and signed /storage URLs needs the password cookie.
   DEMO_PASSWORD: z.string().default(""),
   // Spend guard across all visits and drawing imports, per UTC day. New runs/imports are refused once reached.

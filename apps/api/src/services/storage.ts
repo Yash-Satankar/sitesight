@@ -18,10 +18,11 @@ function localPath(key: string): string | null {
 }
 
 /**
- * Local mode: the API serves objects at /storage/<key> (routes/storage.ts). URLs are relative to the API and
- * signed with a per-process secret, so only URLs this API handed out work, and only until they expire.
+ * Local mode: the API serves objects at /storage/<key> (routes/storage.ts). URLs are signed with
+ * STORAGE_SIGNING_SECRET (stable across restarts) or, without it, a per-process random key, so only URLs this API
+ * handed out work, and only until they expire.
  */
-const LOCAL_SECRET = randomBytes(32);
+const LOCAL_SECRET = env.STORAGE_SIGNING_SECRET ? Buffer.from(env.STORAGE_SIGNING_SECRET, "utf8") : randomBytes(32);
 
 function localSignature(key: string, method: "GET" | "PUT", expires: number): string {
   return createHmac("sha256", LOCAL_SECRET).update([method, key, String(expires)].join("\n")).digest("base64url");

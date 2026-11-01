@@ -216,6 +216,26 @@ describe("storage URLs and production config", () => {
     vi.resetModules();
   });
 
+  it("signed storage URLs survive a restart when STORAGE_SIGNING_SECRET is set", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sitesight-storage-"));
+    const load = async (secret: string) => {
+      vi.resetModules();
+      process.env.STORAGE_LOCAL_DIR = dir;
+      process.env.STORAGE_SIGNING_SECRET = secret;
+      return import("../src/services/storage.js");
+    };
+    const first = await load("stable-secret-for-tests");
+    const url = new URL(await first.presignGet("photos/1/a.jpg"));
+    const [exp, sig] = [url.searchParams.get("exp")!, url.searchParams.get("sig")!];
+    const restarted = await load("stable-secret-for-tests"); // a new process with the same secret
+    expect(restarted.verifyLocalUrl("photos/1/a.jpg", "GET", exp, sig)).toBeNull();
+    const rotated = await load("another-secret");
+    expect(rotated.verifyLocalUrl("photos/1/a.jpg", "GET", exp, sig)).toBe("bad signature");
+    delete process.env.STORAGE_LOCAL_DIR;
+    delete process.env.STORAGE_SIGNING_SECRET;
+    vi.resetModules();
+  });
+
   it("refuses to start production with a broken configuration", () => {
     const good = {
       ...env,

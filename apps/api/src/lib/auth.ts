@@ -1,6 +1,6 @@
 /**
  * Demo access gate. With DEMO_PASSWORD set, browsers log in once and get a signed, HttpOnly session cookie.
- * The signing key is derived from the password, so changing DEMO_PASSWORD logs everyone out. No user accounts.
+ * The signing key is derived from SESSION_SECRET and the password, so changing either logs everyone out. No accounts.
  */
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { RequestHandler } from "express";
@@ -12,7 +12,7 @@ export const SESSION_DAYS = 7;
 export const authRequired = () => env.DEMO_PASSWORD.length > 0;
 
 function key(): Buffer {
-  return createHash("sha256").update(`sitesight-session:${env.DEMO_PASSWORD}`).digest();
+  return createHash("sha256").update(`sitesight-session:${env.SESSION_SECRET}:${env.DEMO_PASSWORD}`).digest();
 }
 function sign(payload: string): string {
   return createHmac("sha256", key()).update(payload).digest("base64url");
