@@ -5,6 +5,7 @@
 .env.*
 !.env.example
 samples
-apps/web
+deploy-secrets.local.txt
+apps/web/scripts
 **/*.log
 **/test

@@ -47,7 +47,7 @@ Meta Global AI Developer Hackathon 2026 · Indie track · Submission due Nov 4, 
 | LLM SDK | `openai` npm package pointed at Meta Model API | Meta API is OpenAI-compatible |
 | Web | React + Vite + Tailwind, PWA plugin | Camera capture on phone |
 | Live trace | Server-Sent Events | Simpler than websockets |
-| Deploy | API + worker + Postgres on Railway, web on Vercel | Already familiar |
+| Deploy | One Railway service (API + worker + built web app, same origin) + Railway Postgres + volume | One origin, one deploy; see DEPLOY.md |
 
 ---
 
@@ -388,7 +388,7 @@ WEB_ORIGIN=http://localhost:5173
 | Oct 30 | Ask-back + re-run, agent_steps trace, cost guard | Low-confidence item triggers a sensible photo request |
 | Oct 31 | HTTP API + worker + SSE | Same flow driven over HTTP |
 | Nov 1 | Web: projects, BOQ review, capture, visit trace | Full flow on a phone |
-| Nov 2 | Review screen, PDF report, deploy (Railway + Vercel) | Public URL works on mobile data |
+| Nov 2 | Review screen, PDF report, deploy (Railway, one service) | Public URL works on mobile data |
 | Nov 3 | Seed demo data, record demo video, README | Video ≤ 3 min uploaded |
 | Nov 4 | Buffer, fixes, submit before 21:00 ET | Submitted |
 

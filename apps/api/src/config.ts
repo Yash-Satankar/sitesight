@@ -36,12 +36,14 @@ const Env = z.object({
   // Infra
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.coerce.number().int().default(8787),
-  // Public base URL of this API as browsers reach it (e.g. https://sitesight-api.up.railway.app). Signed /storage
+  // Public base URL of this API as browsers reach it (one service: https://<domain>/api). Signed /storage
   // URLs are made absolute with it; without it they are relative to the API (local dev through the Vite proxy).
   PUBLIC_API_URL: z
     .string()
     .default("")
     .transform((v) => v.trim().replace(/\/+$/, "")),
+  // Built web app served by the API in production (one service). Default: apps/web/dist in this repo.
+  WEB_DIST_DIR: z.string().default(""),
   // Public demo: when set, every route except /healthz, /auth/* and signed /storage URLs needs the password cookie.
   DEMO_PASSWORD: z.string().default(""),
   // Spend guard across all visits and drawing imports, per UTC day. New runs/imports are refused once reached.

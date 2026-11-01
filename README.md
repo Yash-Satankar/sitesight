@@ -129,7 +129,8 @@ are skipped once it is spent. The labels in `cases.json` are drafts to be confir
 
 ## Deploying
 
-Railway (API + worker in one process, Postgres, a volume for files) and Vercel (web): see [DEPLOY.md](DEPLOY.md).
+One Railway service (API + worker + the built web app in one process), Railway Postgres and a volume for files: see
+[DEPLOY.md](DEPLOY.md).
 
 ## Rules
 

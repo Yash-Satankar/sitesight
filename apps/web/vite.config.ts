@@ -52,7 +52,7 @@ export default defineConfig(({ mode }) => {
       phoneHint(https),
       VitePWA({
         registerType: "autoUpdate",
-        // Never answer API URLs (proxied to Railway by the Vercel rewrite) with the cached app shell.
+        // Never answer API URLs (/api, served by the same Railway service) with the cached app shell.
         workbox: { navigateFallbackDenylist: [/^\/api\//] },
         includeAssets: ["icon.svg"],
         manifest: {

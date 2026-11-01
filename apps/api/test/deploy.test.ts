@@ -232,10 +232,77 @@ describe("storage URLs and production config", () => {
     expect(productionProblems({ ...good, DATABASE_URL: "pglite:memory", PUBLIC_API_URL: "", WEB_ORIGIN: "http://localhost:5173", ALLOW_LAN_ORIGINS: true })).toEqual([
       "DATABASE_URL must point at Postgres",
       "PUBLIC_API_URL is required with local storage (signed URLs must be absolute)",
-      "WEB_ORIGIN must be the deployed web origin (e.g. https://sitesight.vercel.app)",
+      "WEB_ORIGIN must be the deployed origin (e.g. https://sitesight-production.up.railway.app)",
       "ALLOW_LAN_ORIGINS must be false in production",
     ]);
     expect(productionProblems({ ...good, PUBLIC_API_URL: "http://api.example" })).toEqual(["PUBLIC_API_URL must be an https:// URL"]);
+    expect(productionProblems({ ...good, WEB_ORIGIN: "https://sitesight.up.railway.app/" })).toEqual(["WEB_ORIGIN must be https://<host> with no path or trailing slash"]);
+  });
+
+  it("one service: PUBLIC_API_URL must be the web origin + /api", () => {
+    const single = {
+      ...env,
+      NODE_ENV: "production" as const,
+      DATABASE_URL: "postgres://u:p@postgres.railway.internal:5432/railway",
+      STORAGE_LOCAL_DIR: "/data/storage",
+      WEB_ORIGIN: "https://sitesight-production.up.railway.app",
+      PUBLIC_API_URL: "https://sitesight-production.up.railway.app/api",
+      ALLOW_LAN_ORIGINS: false,
+      META_API_KEY: "k",
+      META_BASE_URL: "https://meta.example/v1",
+    };
+    expect(productionProblems(single, { servesWeb: true })).toEqual([]);
+    expect(productionProblems({ ...single, PUBLIC_API_URL: "https://sitesight-production.up.railway.app" }, { servesWeb: true })).toEqual([
+      "PUBLIC_API_URL must be https://sitesight-production.up.railway.app/api when the API serves the web app (the API lives under /api)",
+    ]);
+  });
+});
+
+describe("one service: the API serves the built web app", () => {
+  let web = "";
+  let stop = () => {};
+  beforeAll(async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sitesight-web-"));
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(join(dir, "assets"));
+    writeFileSync(join(dir, "index.html"), "<!doctype html><title>SiteSight</title><div id=root></div>");
+    writeFileSync(join(dir, "assets", "index-Ab12Cd34.js"), "console.log(1)");
+    writeFileSync(join(dir, "sw.js"), "self.x=1");
+    const server = createApp({ webDir: dir }).listen(0);
+    web = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    stop = () => server.close();
+  });
+  afterAll(() => stop());
+
+  it("serves the app shell for client routes, with long caching only for hashed assets", async () => {
+    for (const path of ["/", "/projects/1", "/visits/7/review"]) {
+      const res = await fetch(`${web}${path}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toMatch(/text\/html/);
+      expect(res.headers.get("cache-control")).toBe("no-cache");
+      expect(await res.text()).toContain("<title>SiteSight</title>");
+    }
+    const asset = await fetch(`${web}/assets/index-Ab12Cd34.js`);
+    expect(asset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect((await fetch(`${web}/sw.js`)).headers.get("cache-control")).toBe("no-cache");
+    expect((await fetch(`${web}/assets/missing-123.js`)).status).toBe(404);
+  });
+
+  it("puts the API under /api only (no clash with client routes), with the login gate", async () => {
+    expect(await (await fetch(`${web}/healthz`)).json()).toEqual({ ok: true });
+    expect(await (await fetch(`${web}/api/healthz`)).json()).toEqual({ ok: true });
+    const anon = await fetch(`${web}/api/projects`);
+    expect(anon.status).toBe(401);
+    const me = await (await fetch(`${web}/api/auth/me`)).json();
+    expect(me).toEqual({ authRequired: true, authenticated: false });
+    const projects = await fetch(`${web}/api/projects`, { headers: { Cookie: cookie } });
+    expect(projects.status).toBe(200);
+    expect(Array.isArray(await projects.json())).toBe(true);
+    expect((await fetch(`${web}/api/nope`, { headers: { Cookie: cookie } })).status).toBe(404);
+  });
+
+  it("refuses to start without the web build", () => {
+    expect(() => createApp({ webDir: join(tmpdir(), "no-such-web-build") })).toThrow(/Web build not found/);
   });
 });
 

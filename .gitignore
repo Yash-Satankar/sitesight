@@ -26,3 +26,7 @@ samples/*
 !samples/eval/
 samples/eval/*
 !samples/eval/*.json
+
+# Deploy secrets (generated passwords etc.), never committed
+deploy-secrets.local.txt
+*.local.txt

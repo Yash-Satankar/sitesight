@@ -20,7 +20,7 @@
     "e2e-smoke": "tsx scripts/e2e-smoke.ts",
     "db:purge-e2e": "tsx scripts/purge-e2e.ts",
     "boq-from-drawings": "tsx scripts/boq-from-drawings.ts",
-    "start:prod": "tsx src/prod.ts",
+    "start:prod": "node --import tsx src/prod.ts",
     "eval": "tsx scripts/eval.ts"
   },
   "dependencies": {
