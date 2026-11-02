@@ -21,7 +21,9 @@
     "db:purge-e2e": "tsx scripts/purge-e2e.ts",
     "boq-from-drawings": "tsx scripts/boq-from-drawings.ts",
     "start:prod": "node --import tsx src/prod.ts",
-    "eval": "tsx scripts/eval.ts"
+    "eval": "tsx scripts/eval.ts",
+    "seed-prod": "tsx scripts/seed-prod.ts",
+    "prod-photos": "tsx scripts/prod-photos.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.700.0",

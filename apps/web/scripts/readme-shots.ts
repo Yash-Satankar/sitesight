@@ -21,12 +21,12 @@ const { values: args } = parseArgs({
     "base-url": { type: "string" },
     "password-file": { type: "string", default: "deploy-secrets.local.txt" },
     project: { type: "string", default: "Demo Residence" },
-    "trace-project": { type: "string", default: "Site B" },
+    "trace-project": { type: "string", default: "Plinth-stage site" },
     out: { type: "string", default: "docs/img" },
   },
 });
 if (!args["base-url"]) {
-  console.error("usage: pnpm readme-shots --base-url <https://…> [--password-file deploy-secrets.local.txt] [--project 'Demo Residence'] [--trace-project 'Site B']");
+  console.error("usage: pnpm readme-shots --base-url <https://…> [--password-file deploy-secrets.local.txt] [--project 'Demo Residence'] [--trace-project 'Plinth-stage site']");
   process.exit(2);
 }
 const BASE = args["base-url"].replace(/\/+$/, "");

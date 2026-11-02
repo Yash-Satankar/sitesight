@@ -26,8 +26,8 @@ models and site scanning that a G+2 residential job doesn't have.
 - **Video:** _link to be added_
 
 **Try it in 60 seconds:** log in → **Demo Residence** → **visit 2** → watch the live trace replay, see "+40 pts" in
-the visit summary, open the PDF. Then **Site B** → the trace shows SAM detections the agent rejected (scaffolding,
-rebar cages) and why.
+the visit summary, open the PDF. Then **Plinth-stage site** and **G+2 frame site** → the traces show SAM detections
+the agent rejected (rebar cages, scaffolding poles) and why.
 
 ## How it works
 
