@@ -42,7 +42,7 @@ if (!password) throw new Error(`No DEMO_PASSWORD= line in ${args["password-file"
 let cookie = "";
 async function http<T>(method: string, path: string, body?: unknown, raw?: { data: Buffer; type: string } | FormData): Promise<T> {
   const isForm = raw instanceof FormData;
-  const res = await fetch(path.startsWith("http") ? path : `${BASE}/api${path}`, {
+  const res = await fetchRetrying(method, path.startsWith("http") ? path : `${BASE}/api${path}`, {
     method,
     headers: {
       Origin: BASE,
@@ -56,6 +56,24 @@ async function http<T>(method: string, path: string, body?: unknown, raw?: { dat
   const text = await res.text();
   if (!res.ok) throw new Error(`${method} ${path.split("?")[0]} → HTTP ${res.status}: ${text.slice(0, 300)}`);
   return (text ? JSON.parse(text) : undefined) as T;
+}
+
+/**
+ * fetch with retries for flaky connections: a connection that never opened (connect timeout / refused) is retried for
+ * any method, since nothing reached the server; other network errors only for GET (safe to repeat).
+ */
+async function fetchRetrying(method: string, url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fetch(url, init);
+    } catch (err) {
+      const code = (err as { cause?: { code?: string } }).cause?.code ?? "";
+      const neverSent = ["UND_ERR_CONNECT_TIMEOUT", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"].includes(code);
+      if (attempt >= 4 || !(neverSent || method === "GET")) throw err;
+      console.log(`    (network ${code || "error"} on ${method} ${url.replace(BASE, "")}, retrying ${attempt}/3)`);
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+  }
 }
 
 const money = (n: number) => `$${n.toFixed(4)}`;
