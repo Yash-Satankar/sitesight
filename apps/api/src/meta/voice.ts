@@ -34,7 +34,11 @@ export async function transcribe(audio: Buffer, filename = "note.wav"): Promise<
   form.append("audio", new Blob([new Uint8Array(audio)], { type: "audio/wav" }), filename);
   const res = await fetch(`${env.META_BASE_URL.replace(/\/+$/, "")}/asr/transcribe`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${env.META_API_KEY}`, Accept: "application/json" },
+    headers: {
+      Authorization: `Bearer ${env.META_API_KEY}`,
+      Accept: "application/json",
+      ...(env.META_PROXY_SECRET ? { "X-Meta-Proxy-Secret": env.META_PROXY_SECRET } : {}),
+    },
     body: form,
     signal: AbortSignal.timeout(120_000),
   });

@@ -1,0 +1,7 @@
+{
+  "name": "sitesight-meta-proxy",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "22.x" },
+  "devDependencies": { "@types/node": "22.10.2" }
+}

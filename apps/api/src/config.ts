@@ -11,6 +11,9 @@ const Env = z.object({
   // Meta Model API. Optional at boot so the API can start without keys; meta/ throws on use.
   META_API_KEY: z.string().default(""),
   META_BASE_URL: z.string().default(""),
+  // When META_BASE_URL points at the SiteSight Meta proxy (meta-proxy/, Vercel bom1), this shared secret is sent as
+  // X-Meta-Proxy-Secret on every model call. Empty = calling Meta directly.
+  META_PROXY_SECRET: z.string().default(""),
   SPARK_MODEL: z.string().default("muse-spark-1.3"),
   SAM_MODEL: z.string().default("sam-3.1"),
   VOICE_MODEL: z.string().default("muse-voice-transcribe-1.0"),

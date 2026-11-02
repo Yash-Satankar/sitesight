@@ -71,6 +71,18 @@ Startup log on success:
 [worker] started
 ```
 
+## Meta proxy (when Meta refuses Railway's network)
+
+Meta's Model API lists **no models** for requests from Railway's outbound IP (152.55.180.78, Ashburn, AS400940
+Railway) and answers `model_not_found`, in every Railway region, while the same key works from India. The fix is a tiny
+proxy on Vercel pinned to Mumbai: [meta-proxy/](meta-proxy/README.md). It forwards only `POST /v1/responses` and
+`POST /v1/asr/transcribe`, requires a shared secret header, holds the real key, caps bodies at 4.4 MB, logs nothing.
+
+1. `cd meta-proxy && vercel link --yes --project sitesight-meta-proxy`
+2. Vercel env (production, sensitive): `META_API_KEY`, `META_PROXY_SECRET` (random).
+3. `vercel deploy --prod` → `https://sitesight-meta-proxy.vercel.app` (region `bom1`).
+4. Railway variables: `META_BASE_URL=https://sitesight-meta-proxy.vercel.app/v1`, `META_PROXY_SECRET=<same value>`.
+
 ## Environment variables
 
 | Variable | Example | Notes |
@@ -86,6 +98,7 @@ Startup log on success:
 | `STORAGE_SIGNING_SECRET` | random | Optional but recommended: signs storage URLs so they survive restarts. |
 | `DAILY_SPEND_CAP_USD` | `5` | Meta spend per UTC day from the spend ledger (agent runs, drawing imports, spreadsheet BOQ parses; kept when projects are deleted). |
 | `META_API_KEY`, `META_BASE_URL` | — | Meta Model API. |
+| `META_PROXY_SECRET` | random | Only with the Meta proxy: sent as `X-Meta-Proxy-Secret`; `META_BASE_URL` points at the proxy. |
 | `SPARK_MODEL`, `SAM_MODEL`, `VOICE_MODEL` | `muse-spark-1.3`, `sam-3.1`, `muse-voice-transcribe-1.0` | Never a `-contributor` variant. |
 | `SPARK_INPUT_USD_PER_MTOK`, `SPARK_OUTPUT_USD_PER_MTOK`, `SAM_USD_PER_IMAGE` | `1.25`, `4.25`, `0.0025` | Required, > 0. |
 | `MAX_COST_PER_VISIT_USD` | `1.50` | Optional (default 1.50). |

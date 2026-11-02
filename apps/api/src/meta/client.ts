@@ -14,6 +14,8 @@ export function metaClient(): OpenAI {
     // The SDK retries 408/409/429/5xx with exponential backoff.
     maxRetries: 4,
     timeout: 120_000,
+    // Through the Meta proxy (meta-proxy/): authenticates this API to it.
+    ...(env.META_PROXY_SECRET ? { defaultHeaders: { "X-Meta-Proxy-Secret": env.META_PROXY_SECRET } } : {}),
   });
   return instance;
 }

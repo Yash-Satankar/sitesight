@@ -30,3 +30,6 @@ samples/eval/*
 # Deploy secrets (generated passwords etc.), never committed
 deploy-secrets.local.txt
 *.local.txt
+
+# Vercel project link (meta-proxy)
+.vercel
