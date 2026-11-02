@@ -24,6 +24,8 @@ const { values: args } = parseArgs({
     only: { type: "string" }, // comma-separated screen names
     "api-port": { type: "string", default: "8798" },
     "web-port": { type: "string", default: "5198" },
+    // Seed, then keep the app running behind the demo password instead of taking screenshots (for readme-shots).
+    serve: { type: "string" },
   },
 });
 
@@ -426,6 +428,12 @@ async function main() {
   });
   await vite.listen();
   const WEB = `http://127.0.0.1:${args["web-port"]}`;
+  if (args.serve) {
+    const { env: gateEnv } = await import("../../api/src/config.js");
+    gateEnv.DEMO_PASSWORD = args.serve;
+    console.log(`Serving the seeded demo at ${WEB} behind the demo password (Ctrl+C to stop)`);
+    await new Promise(() => {});
+  }
 
   // A photo to upload on the capture screen (proves the strip refreshes with the real thumbnail).
   const uploadFile = join(outDir, "upload.jpg");

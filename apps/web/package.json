@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "dev:https": "vite --host --mode https",
-    "ui-shots": "tsx scripts/ui-shots.ts"
+    "ui-shots": "tsx scripts/ui-shots.ts",
+    "readme-shots": "tsx scripts/readme-shots.ts"
   },
   "dependencies": {
     "@sitesight/shared": "workspace:*",

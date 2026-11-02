@@ -1,16 +1,33 @@
 # SiteSight
 
-Phone photos + a BOQ in, a bill-ready progress report out: an agent built on Muse Spark and SAM 3.1 measures
-construction progress per BOQ item, with evidence an engineer can check.
+Architect's drawings and phone photos in, a bill-ready progress report out — an agent built on Muse Spark and SAM 3.1
+measures construction progress per BOQ item, with evidence an engineer can check.
+
+| Live trace: detections checked and rejected | Drawing import with page sources | Review card |
+|---|---|---|
+| ![Agent trace with rejected detections](docs/img/trace-rejections.png) | ![Drawing import: proposed BOQ with source pages](docs/img/drawing-import.png) | ![Review card with masks on the evidence photo](docs/img/review-card.png) |
 
 **Problem.** Small contractors track progress through WhatsApp photos and Excel BOQs. Running bills are argued line by
 line because nobody can show how much of an item is actually built. Enterprise progress tools need 360° cameras, BIM
 models and site scanning that a G+2 residential job doesn't have.
 
+## Why it matters
+
+- **No extra hardware:** the site engineer's phone is the only device. No 360° camera, drone or BIM model.
+- **Cheap per visit:** about $0.13 of AI for a one-photo visit on production (32 agent steps, 72 s); reading a 14-page
+  drawing set cost $0.25 once per project. Caps: $1.50 per visit, $5 per day.
+- **Traceable:** every quantity points to a photo (with the masks that were counted) or a drawing page (with the text
+  that was read).
+- **Inferred work is never billed:** hidden work deduced from what's visible is listed separately until someone sees it.
+
 ## Demo
 
 - **Live:** https://sitesightapi-production.up.railway.app (password in the submission form)
 - **Video:** _link to be added_
+
+**Try it in 60 seconds:** log in → **Demo Residence** → **visit 2** → watch the live trace replay, see "+40 pts" in
+the visit summary, open the PDF. Then **Site B** → the trace shows SAM detections the agent rejected (scaffolding,
+rebar cages) and why.
 
 ## How it works
 
@@ -81,6 +98,9 @@ tolerance, evidence basis, drawing totals; how many SAM detections the agent rej
 positives (e.g. "rebar cages are not cast columns") were among them; consistency across `--runs`; cost and latency.
 Spend is hard-capped by `--max-cost`.
 
+The sample site photos and client drawings are **not in the repo**, for privacy: `cases.json` points at local files
+under `samples/` (gitignored), so the eval runs where those files exist.
+
 | Metric | Result |
 |---|---|
 | Stage, exact match | _to fill from `pnpm eval --runs 3`_ |
@@ -112,6 +132,8 @@ Spend is hard-capped by `--max-cost`.
 
 ## Run it locally
 
+Sample photos and drawings are not included (privacy); use your own, or the live demo.
+
 ```sh
 pnpm install
 cp .env.example .env      # META_API_KEY, META_BASE_URL, prices; STORAGE_LOCAL_DIR=samples/out/storage
@@ -130,3 +152,7 @@ Deployment: [DEPLOY.md](DEPLOY.md). Full design: [DESIGN.md](DESIGN.md).
   found`, while the same key and model worked from India. Moving the service and database to US East fixed it.
 - **SAM prompt wording matters.** "exposed brick wall" finds walls that a plain "brick wall" prompt misses, so
   brickwork runs two prompt variants ("exposed brick wall", "brickwork") and merges overlapping masks by IoU.
+
+## License
+
+[MIT](LICENSE) © 2026 Yash Satankar

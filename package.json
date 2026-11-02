@@ -25,7 +25,8 @@
     "ui-shots": "pnpm --filter @sitesight/web ui-shots",
     "boq-from-drawings": "pnpm --filter @sitesight/api boq-from-drawings",
     "start:prod": "pnpm --filter @sitesight/api start:prod",
-    "eval": "pnpm --filter @sitesight/api eval"
+    "eval": "pnpm --filter @sitesight/api eval",
+    "readme-shots": "pnpm --filter @sitesight/web readme-shots"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

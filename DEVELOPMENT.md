@@ -124,6 +124,19 @@ pnpm eval --max-cost 5    # hard cap on Meta spend for the whole eval (default $
 Each run's own cap is shrunk to what is left of `--max-cost`, so a run can overshoot it by at most one model call; runs
 are skipped once it is spent. The labels in `cases.json` are drafts to be confirmed by the site engineer.
 
+## README screenshots
+
+```sh
+pnpm readme-shots --base-url https://sitesightapi-production.up.railway.app
+```
+
+Logs in through the login screen with `DEMO_PASSWORD` from `deploy-secrets.local.txt` (never printed) and writes
+`docs/img/trace-rejections.png`, `drawing-import.png` and `review-card.png` at phone width. The right and bottom strips
+of every drawing thumbnail (the title block: client name, firm, address) are blurred. Options: `--project` (default
+"Demo Residence", its second visit is used for the review card), `--trace-project` (default "Site B", searched first
+for a trace with rejected detections). To try it locally: `pnpm --filter @sitesight/web exec tsx scripts/ui-shots.ts
+--serve <password>` serves the seeded demo at http://127.0.0.1:5198 behind that password.
+
 ## Rules
 
 - Nothing outside `apps/api/src/meta/` imports the `openai` SDK.
