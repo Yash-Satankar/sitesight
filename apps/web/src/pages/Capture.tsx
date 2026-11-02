@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Camera, Check, ImagePlus, Mic, Play, Trash2, Upload } from "lucide-react";
 import { api, apiUrl, uploadFile } from "../lib/api";
+import { toVoiceWav } from "../lib/wav";
 import { useAsync } from "../lib/useAsync";
 import { ErrorNote } from "../components/Layout";
 import { AskBackCard } from "../components/AskBackCard";
@@ -234,9 +235,16 @@ function VoiceRecorder({ value, onChange }: { value: Blob | null; onChange: (b: 
       const chunks: Blob[] = [];
       const rec = new MediaRecorder(stream);
       rec.ondataavailable = (e) => chunks.push(e.data);
-      rec.onstop = () => {
+      rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
-        onChange(new Blob(chunks, { type: rec.mimeType.split(";")[0] || "audio/webm" }));
+        const recording = new Blob(chunks, { type: rec.mimeType.split(";")[0] || "audio/webm" });
+        // Meta's transcription takes 16 kHz mono WAV only: convert here (the server has no audio tools).
+        try {
+          onChange(await toVoiceWav(recording));
+        } catch {
+          onChange(null);
+          alert("This browser couldn't prepare the voice note. Upload the photo without it, or try another browser.");
+        }
       };
       rec.start();
       recorder.current = rec;

@@ -4,7 +4,7 @@ import { env } from "../config.js";
 import { db, schema } from "../db/client.js";
 import { runAgent } from "../agent/run.js";
 import { CostLimitError } from "../meta/cost.js";
-import { transcribe } from "../meta/voice.js";
+import { transcribe, VoiceFormatError } from "../meta/voice.js";
 import { getObject } from "../services/storage.js";
 import { claimNext, releaseStale, type Job } from "../services/jobs.js";
 import { markDrawingImportFailed, runDrawingImport } from "../services/drawings/imports.js";
@@ -39,7 +39,8 @@ async function handle(job: Job): Promise<void> {
 
 async function onFailure(job: Job, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
-  const permanent = err instanceof CostLimitError || job.attempts >= env.JOB_MAX_ATTEMPTS;
+  // Retrying can't fix an over-budget visit or a voice note in a format the ASR endpoint rejects.
+  const permanent = err instanceof CostLimitError || err instanceof VoiceFormatError || job.attempts >= env.JOB_MAX_ATTEMPTS;
   console.error(`[worker] job ${job.id} (${job.kind}) failed, attempt ${job.attempts}: ${message}`);
 
   await db

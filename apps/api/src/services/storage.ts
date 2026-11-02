@@ -67,6 +67,7 @@ const EXT: Record<string, string> = {
   "image/png": "png",
   "image/webp": "webp",
   "image/heic": "heic",
+  "audio/wav": "wav",
   "audio/webm": "webm",
   "audio/mp4": "m4a",
   "audio/mpeg": "mp3",
