@@ -125,6 +125,7 @@ async function runPhotoCase(c: PhotoCase, run: number, cap: number): Promise<Run
         rejected: segs.filter((s) => s.verified === false).length,
         unverified: segs.filter((s) => s.verified == null).length,
       },
+      detectionsByConcept: segs.reduce<Record<string, number>>((m, s) => ((m[s.concept] = (m[s.concept] ?? 0) + 1), m), {}),
       rejections: segs
         .filter((s) => s.verified === false)
         .map((s) => ({ segmentId: s.id, concept: s.concept, reason: s.rejectReason ?? "", photo: label.get(s.photoId) ?? `photo ${s.photoId}` })),

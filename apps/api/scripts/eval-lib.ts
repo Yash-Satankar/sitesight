@@ -19,7 +19,22 @@ const RejectNote = z.object({
   note: z.string().min(1),
   /** Passes when any rejected detection's reason contains one of these (case-insensitive). */
   keywords: z.array(z.string().min(1)).min(1),
+  /** Segment targets this thing can be mistaken for; derived from the keywords when omitted. */
+  concepts: z.array(z.enum(["column", "brickwork"])).optional(),
 });
+
+/** What SAM could mistake each kind of false positive for (scaffold poles look like columns, tarps like walls). */
+const CONCEPT_HINTS: { concept: "column" | "brickwork"; words: RegExp }[] = [
+  { concept: "column", words: /scaffold|bamboo|pole|prop|rebar|cage|starter|bar|steel|reinforcement|tree|trunk|column/ },
+  { concept: "brickwork", words: /tarp|net|sheet|cloth|cover|brick|wall|block|masonry/ },
+];
+
+export function rejectNoteConcepts(r: { keywords: string[]; concepts?: ("column" | "brickwork")[] }): ("column" | "brickwork")[] {
+  if (r.concepts?.length) return r.concepts;
+  const text = r.keywords.join(" ").toLowerCase();
+  const hit = CONCEPT_HINTS.filter((h) => h.words.test(text)).map((h) => h.concept);
+  return hit.length ? hit : ["column", "brickwork"]; // e.g. a neighbouring building: could be either
+}
 
 export const PhotoCase = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
@@ -73,6 +88,8 @@ export interface PhotoRunOutput {
   /** Item status when not assessed, e.g. "awaiting photo (ask-back #3)". */
   itemStatus: Record<string, string>;
   detections: { total: number; kept: number; rejected: number; unverified: number };
+  /** Detections per segment target (column, brickwork). */
+  detectionsByConcept?: Record<string, number>;
   rejections: { segmentId: number; concept: string; reason: string; photo: string }[];
   outcome: string;
   error: string | null;
@@ -107,7 +124,11 @@ export interface RunRecord {
   /** From the case: only "human" runs count in the headline numbers. */
   labelledBy?: "human" | "draft";
   checks: Check[];
-  rejectNotes?: { note: string; matched: boolean; example?: string }[];
+  /**
+   * Per labelled false positive: caught (a rejection reason matches), not_caught (SAM detected that kind of target
+   * but no rejection matches: a miss), or not_detected (SAM produced no detection it could be: nothing to reject).
+   */
+  rejectNotes?: { note: string; matched: boolean; status?: RejectStatus; example?: string }[];
   detections?: PhotoRunOutput["detections"];
   rejections?: PhotoRunOutput["rejections"];
 }
@@ -145,10 +166,23 @@ export function scorePhotoRun(c: PhotoCase, out: PhotoRunOutput): { checks: Chec
   }
   const rejectNotes = c.should_reject.map((r) => {
     const hit = out.rejections.find((x) => r.keywords.some((k) => norm(x.reason).includes(norm(k))));
-    return { note: r.note, matched: !!hit, example: hit ? `#${hit.segmentId} ${hit.concept}: "${hit.reason}"` : undefined };
+    if (hit) return { note: r.note, matched: true, status: "caught" as const, example: `#${hit.segmentId} ${hit.concept}: "${hit.reason}"` };
+    const concepts = rejectNoteConcepts(r);
+    // Older run outputs have no per-concept counts: fall back to "any detection at all".
+    const candidates = out.detectionsByConcept
+      ? concepts.reduce((s, k) => s + (out.detectionsByConcept![k] ?? 0), 0)
+      : out.detections.total;
+    return candidates
+      ? { note: r.note, matched: false, status: "not_caught" as const, example: `${candidates} ${concepts.join("/")} detection(s), none rejected as this` }
+      : { note: r.note, matched: false, status: "not_detected" as const, example: `no ${concepts.join("/")} detection: nothing to reject` };
   });
   return { checks, rejectNotes };
 }
+
+export type RejectStatus = "caught" | "not_caught" | "not_detected";
+
+/** Old records (before statuses) count every unmatched note as a miss, as they did then. */
+const statusOf = (n: { matched: boolean; status?: RejectStatus }): RejectStatus => n.status ?? (n.matched ? "caught" : "not_caught");
 
 export function scoreDrawingRun(c: DrawingCase, out: DrawingRunOutput): Check[] {
   const checks: Check[] = [];
@@ -221,7 +255,8 @@ export interface Summary {
   count: Ratio;
   basis: Ratio;
   drawings: Ratio;
-  rejectNotes: Ratio;
+  /** Caught / (caught + not caught). Labelled false positives SAM never detected are left out (see notDetected). */
+  rejectNotes: Ratio & { notDetected: number };
   detections: { total: number; rejected: number };
   consistency: Ratio | null;
   runs: { done: number; failed: number; skipped: number };
@@ -244,10 +279,11 @@ export function summarize(records: RunRecord[]): Summary {
     count: ratio(["count"]),
     basis: ratio(["basis"]),
     drawings: ratio(["columns", "footings", "slab_items", "slab_thickness"]),
-    rejectNotes: {
-      pass: photoDone.flatMap((r) => r.rejectNotes ?? []).filter((n) => n.matched).length,
-      total: photoDone.flatMap((r) => r.rejectNotes ?? []).length,
-    },
+    rejectNotes: (() => {
+      const notes = photoDone.flatMap((r) => r.rejectNotes ?? []);
+      const by = (s: RejectStatus) => notes.filter((n) => statusOf(n) === s).length;
+      return { pass: by("caught"), total: by("caught") + by("not_caught"), notDetected: by("not_detected") };
+    })(),
     detections: {
       total: photoDone.reduce((s, r) => s + (r.detections?.total ?? 0), 0),
       rejected: photoDone.reduce((s, r) => s + (r.detections?.rejected ?? 0), 0),
@@ -280,7 +316,7 @@ export function summaryTable(s: Summary, meta: { runsPerCase: number; cases: num
     ["Count within tolerance", pct(s.count)],
     ["Evidence basis correct", pct(s.basis)],
     ["Drawing import checks", pct(s.drawings)],
-    ["False detections caught (labelled)", pct(s.rejectNotes)],
+    ["False detections caught (labelled)", `${pct(s.rejectNotes)}${s.rejectNotes.notDetected ? ` · ${s.rejectNotes.notDetected} not detected (nothing to reject)` : ""}`],
     ["SAM detections rejected by the agent", s.detections.total ? `${s.detections.rejected}/${s.detections.total} (${Math.round((s.detections.rejected / s.detections.total) * 100)}%)` : "—"],
     ["Same answer across runs", s.consistency ? pct(s.consistency) : `— (needs --runs 2+)`],
     ["Cost per run (avg)", usd(s.avgCostPerRunUsd)],
@@ -337,10 +373,12 @@ export function reportMarkdown(
       const examples = [...new Map(done.flatMap((r) => r.rejections ?? []).map((x) => [x.reason, x])).values()].slice(0, 6);
       for (const e of examples) lines.push(`- #${e.segmentId} ${e.concept} (${e.photo}): "${e.reason}"`);
       if (c.should_reject.length) {
-        lines.push("", "**Should reject:**");
+        lines.push("", "**Labelled false positives** (caught / not caught / not detected by SAM, over runs):", "");
+        lines.push("| False positive | Caught | Not caught | Not detected (nothing to reject) |", "|---|---|---|---|");
         for (const n of c.should_reject) {
-          const hits = done.filter((r) => r.rejectNotes?.find((x) => x.note === n.note)?.matched).length;
-          lines.push(`- ${n.note}: caught in ${hits}/${done.length} run(s)`);
+          const st = done.map((r) => r.rejectNotes?.find((x) => x.note === n.note)).filter((x) => x != null).map(statusOf);
+          const k = (s: RejectStatus) => st.filter((x) => x === s).length;
+          lines.push(`| ${n.note} | ${k("caught")} | ${k("not_caught")} | ${k("not_detected")} |`);
         }
       }
       lines.push("");

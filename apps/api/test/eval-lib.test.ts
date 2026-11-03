@@ -11,6 +11,7 @@ import {
   scorePhotoRun,
   summarize,
   compareVerdict,
+  rejectNoteConcepts,
   summaryTable,
   type DrawingCase,
   type PhotoCase,
@@ -84,9 +85,22 @@ describe("scorePhotoRun", () => {
     ]);
     expect(checks.find((c) => c.item === "PB-1")!.note).toBe("not assessed (awaiting photo (ask-back #4))");
     expect(rejectNotes).toEqual([
-      { note: "rebar cages are not cast columns", matched: true, example: '#7 column: "Rebar cage, not a cast column"' },
-      { note: "bamboo props are not columns", matched: false, example: undefined },
+      { note: "rebar cages are not cast columns", matched: true, status: "caught", example: '#7 column: "Rebar cage, not a cast column"' },
+      // No per-concept counts in this output: any detection (5) counts as something it could have been.
+      { note: "bamboo props are not columns", matched: false, status: "not_caught", example: "5 column detection(s), none rejected as this" },
     ]);
+  });
+
+  it("a labelled false positive SAM never detected is 'not detected (nothing to reject)', not a miss", () => {
+    const tarp = { ...photoCase, should_reject: [{ note: "tarps are not walls", keywords: ["tarp", "net"] }, { note: "poles are not columns", keywords: ["pole"] }] };
+    // Columns detected (and none rejected as poles), no brickwork detected at all.
+    const out = output({ rejections: [], detectionsByConcept: { column: 3 } });
+    expect(scorePhotoRun(tarp, out).rejectNotes).toEqual([
+      { note: "tarps are not walls", matched: false, status: "not_detected", example: "no brickwork detection: nothing to reject" },
+      { note: "poles are not columns", matched: false, status: "not_caught", example: "3 column detection(s), none rejected as this" },
+    ]);
+    expect(rejectNoteConcepts({ keywords: ["neighbour"] })).toEqual(["column", "brickwork"]);
+    expect(rejectNoteConcepts({ keywords: ["tarp"], concepts: ["column"] })).toEqual(["column"]);
   });
 
   it("fails counts outside the tolerance and wrong stages", () => {
@@ -146,7 +160,7 @@ const rec = (caseId: string, run: number, actuals: Record<string, string>, extra
     const [item, metric] = k.split(" ") as [string, "stage"];
     return { item, metric, expected: "reinforcement", actual, pass: actual === "reinforcement" };
   }),
-  rejectNotes: [{ note: "n", matched: run !== 2 }],
+  rejectNotes: [{ note: "rebar cages are not cast columns", matched: run !== 2 }],
   detections: { total: 4, kept: 3, rejected: 1, unverified: 0 },
   rejections: [],
   ...extra,
@@ -182,7 +196,7 @@ describe("consistency, summary and report", () => {
       stage: { pass: 3, total: 4 },
       basis: { pass: 0, total: 3 },
       detections: { total: 16, rejected: 4 },
-      rejectNotes: { pass: 3, total: 4 },
+      rejectNotes: { pass: 3, total: 4, notDetected: 0 },
       consistency: { pass: 0, total: 2 },
       runs: { done: 4, failed: 0, skipped: 1 },
       costUsd: 0.9,
@@ -220,7 +234,8 @@ describe("consistency, summary and report", () => {
     expect(md).toContain("| 3 | done | $0.30 | 60 s | 9 | 0/2 |");
     expect(md).toContain("| 2 | skipped (eval cost cap reached) | $0.00 | 0 s | — | — |");
     expect(md).toContain("- SLB-GF stage: reinforcement / reinforcement / shuttering");
-    expect(md).toContain("**Should reject:**");
+    expect(md).toContain("**Labelled false positives** (caught / not caught / not detected by SAM, over runs):");
+    expect(md).toContain("| rebar cages are not cast columns | 2 | 1 | 0 |"); // c1: caught in runs 1 and 3, missed in run 2
   });
 });
 
@@ -245,5 +260,25 @@ describe("compareVerdict", () => {
     const worse = compareVerdict(base, with_({ avgLatencyMs: 1, stage: { pass: 0, total: base.stage.total } }));
     expect(worse).toMatchObject({ keep: false, drops: ["Stage, exact match"] });
     expect(compareVerdict(base, with_({ avgLatencyMs: 1, runs: { ...base.runs, failed: 1 } })).drops).toEqual(["Failed runs"]);
+  });
+});
+
+describe("labelled false positives in the summary", () => {
+  it("leaves 'not detected' out of the rate and reports it next to it", () => {
+    const r = (status: "caught" | "not_caught" | "not_detected") => ({
+      caseId: "c",
+      kind: "photos" as const,
+      run: 1,
+      status: "done" as const,
+      costUsd: 0,
+      latencyMs: 0,
+      checks: [],
+      rejectNotes: [{ note: "n", matched: status === "caught", status }],
+    });
+    const s = summarize([r("caught"), r("not_caught"), r("not_detected"), r("not_detected")]);
+    expect(s.rejectNotes).toEqual({ pass: 1, total: 2, notDetected: 2 });
+    expect(summaryTable(s, { runsPerCase: 1, cases: 1, model: "m", date: "d" })).toContain(
+      "| False detections caught (labelled) | 1/2 (50%) · 2 not detected (nothing to reject) |",
+    );
   });
 });
