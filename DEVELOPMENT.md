@@ -129,8 +129,14 @@ model turn, puts the instances and the masked overlays in the starting context, 
 items in one call, each validated on its own) with `finish` allowed in the same turn. `eval-compare` recommends keeping
 it only if no accuracy metric drops and latency improves.
 
+Labels: `pnpm eval-label` (no Meta calls) walks the draft cases (photo opens; [c] confirm, [e] edit field by field,
+[s] skip), then every real site photo in `samples/` that no case uses yet (stock images are skipped): which BOQ, stage
+reached, cast columns visible, plinth beams, walls and their material, false positives present, notes. Confirmed and new
+cases get `labelled_by: "human"`; the rest stay `"draft"`. It saves after every case. Report headlines use
+human-labelled cases only and say how many there are; draft cases are listed separately.
+
 Each run's own cap is shrunk to what is left of `--max-cost`, so a run can overshoot it by at most one model call; runs
-are skipped once it is spent. The labels in `cases.json` are drafts to be confirmed by the site engineer.
+are skipped once it is spent.
 
 ## README screenshots
 

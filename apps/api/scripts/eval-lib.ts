@@ -29,6 +29,10 @@ export const PhotoCase = z.object({
   boq: z.string().min(1),
   expected: z.record(z.string(), ItemLabel),
   should_reject: z.array(RejectNote).default([]),
+  /** "human": confirmed or written by the site engineer (pnpm eval-label). Only these count in headline numbers. */
+  labelled_by: z.enum(["human", "draft"]).default("draft"),
+  /** Answers kept for the record but not scored (wall material, "not in view", …). */
+  observations: z.record(z.string(), z.string()).optional(),
 });
 export type PhotoCase = z.infer<typeof PhotoCase>;
 
@@ -42,6 +46,7 @@ export const DrawingCase = z.object({
     footings: z.number().int().nonnegative().optional(),
     slabs: z.object({ floor: z.string().min(1), count: z.number().int().positive(), thickness: z.string().optional() }).optional(),
   }),
+  labelled_by: z.enum(["human", "draft"]).default("draft"),
 });
 export type DrawingCase = z.infer<typeof DrawingCase>;
 
@@ -99,6 +104,8 @@ export interface RunRecord {
   latencyMs: number;
   /** Model turns used by the agent (photo cases). */
   turns?: number;
+  /** From the case: only "human" runs count in the headline numbers. */
+  labelledBy?: "human" | "draft";
   checks: Check[];
   rejectNotes?: { note: string; matched: boolean; example?: string }[];
   detections?: PhotoRunOutput["detections"];
@@ -290,8 +297,15 @@ export function reportMarkdown(
   cases: EvalCase[],
   meta: { runsPerCase: number; model: string; date: string; maxCostUsd: number; labelsNote: string; outDir: string; fastPath?: boolean },
 ): string {
+  const human = records.filter((r) => r.labelledBy === "human");
+  const humanCases = cases.filter((c) => c.labelled_by === "human").length;
   const s = summarize(records);
-  const lines: string[] = [`# SiteSight eval — ${meta.date}`, "", summaryTable(s, { ...meta, cases: cases.length }), ""];
+  const lines: string[] = [`# SiteSight eval — ${meta.date}`, ""];
+  lines.push(headlineNote(humanCases, cases.length, meta.runsPerCase), "");
+  if (humanCases) lines.push(summaryTable(summarize(human), { ...meta, cases: humanCases }), "");
+  if (humanCases < cases.length) {
+    lines.push(`### All cases, including ${cases.length - humanCases} draft-labelled (not headline numbers)`, "", summaryTable(s, { ...meta, cases: cases.length }), "");
+  }
   lines.push(`Budget cap: $${meta.maxCostUsd.toFixed(2)} · spent $${s.costUsd.toFixed(2)}${s.runs.skipped ? ` · ${s.runs.skipped} run(s) skipped at the cap` : ""}`, "");
   if (meta.labelsNote) lines.push(`> Labels: ${meta.labelsNote}`, "");
   const cons = consistency(records);
@@ -455,3 +469,9 @@ export function compareMarkdown(a: Report, b: Report, labels: { a: string; b: st
 }
 
 const usd4 = (n: number | null) => (n == null ? "—" : `$${n.toFixed(3)}`);
+
+/** First line of every report: how many cases the headline numbers rest on. */
+export function headlineNote(humanCases: number, totalCases: number, runsPerCase: number): string {
+  if (!humanCases) return `**Headline: 0 human-labelled cases** (${totalCases} draft). Run \`pnpm eval-label\` to confirm labels; the table below uses draft labels only.`;
+  return `**Headline: ${humanCases} human-labelled case${humanCases === 1 ? "" : "s"} × ${runsPerCase} run${runsPerCase === 1 ? "" : "s"}**${totalCases > humanCases ? ` (${totalCases - humanCases} draft case(s) excluded from the headline)` : ""}.`;
+}

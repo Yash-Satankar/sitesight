@@ -21,6 +21,7 @@ import {
 const casesPath = fileURLToPath(new URL("../../../samples/eval/cases.json", import.meta.url));
 
 const photoCase: PhotoCase = {
+  labelled_by: "human",
   id: "c1",
   kind: "photos",
   description: "",
@@ -102,7 +103,7 @@ describe("scorePhotoRun", () => {
 });
 
 describe("scoreDrawingRun", () => {
-  const dc: DrawingCase = { id: "d", kind: "drawings", description: "", pdf: "x.pdf", expected: { columns: 12, footings: 10, slabs: { floor: "GF", count: 1, thickness: '5"' } } };
+  const dc: DrawingCase = { id: "d", kind: "drawings", labelled_by: "draft", description: "", pdf: "x.pdf", expected: { columns: 12, footings: 10, slabs: { floor: "GF", count: 1, thickness: '5"' } } };
   const item = (code: string, plannedQty: number, description = code, needsInput: string | null = null) => ({ code, description, plannedQty, unit: "nos", needsInput });
 
   it("sums columns and footings, counts slab items per floor and checks the thickness as drawn", () => {

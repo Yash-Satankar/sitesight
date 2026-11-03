@@ -23,6 +23,7 @@
     "start:prod": "node --import tsx src/prod.ts",
     "eval": "tsx scripts/eval.ts",
     "eval-compare": "tsx scripts/eval-compare.ts",
+    "eval-label": "tsx scripts/eval-label.ts",
     "seed-prod": "tsx scripts/seed-prod.ts",
     "prod-photos": "tsx scripts/prod-photos.ts"
   },

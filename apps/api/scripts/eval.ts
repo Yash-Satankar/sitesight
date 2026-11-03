@@ -18,6 +18,7 @@ import { parseArgs } from "node:util";
 import {
   EVAL_USAGE,
   EvalBudget,
+  headlineNote,
   parseCases,
   reportMarkdown,
   scoreDrawingRun,
@@ -136,6 +137,7 @@ async function runPhotoCase(c: PhotoCase, run: number, cap: number): Promise<Run
       caseId: c.id,
       kind: "photos",
       run,
+      labelledBy: c.labelled_by,
       status: failed ? "failed" : "done",
       reason: failed ? (v.error ?? "agent failed") : v.outcome !== "assessed" ? v.outcome : undefined,
       costUsd: v.costUsd,
@@ -147,7 +149,7 @@ async function runPhotoCase(c: PhotoCase, run: number, cap: number): Promise<Run
       rejections: output.rejections,
     };
   } catch (err) {
-    return { caseId: c.id, kind: "photos", run, status: "failed", reason: err instanceof Error ? err.message : String(err), costUsd: 0, latencyMs: Date.now() - started, checks: [] };
+    return { caseId: c.id, kind: "photos", run, labelledBy: c.labelled_by, status: "failed", reason: err instanceof Error ? err.message : String(err), costUsd: 0, latencyMs: Date.now() - started, checks: [] };
   } finally {
     env.MAX_COST_PER_VISIT_USD = visitCap;
   }
@@ -178,6 +180,7 @@ async function runDrawingCase(c: DrawingCase, run: number, cap: number): Promise
       caseId: c.id,
       kind: "drawings",
       run,
+      labelledBy: c.labelled_by,
       status: "done",
       reason: stoppedByCost ? "stopped at the cost cap" : undefined,
       costUsd: meter.spentUsd,
@@ -185,7 +188,7 @@ async function runDrawingCase(c: DrawingCase, run: number, cap: number): Promise
       checks,
     };
   } catch (err) {
-    return { caseId: c.id, kind: "drawings", run, status: "failed", reason: err instanceof Error ? err.message : String(err), costUsd: meter.spentUsd, latencyMs: Date.now() - started, checks: [] };
+    return { caseId: c.id, kind: "drawings", run, labelledBy: c.labelled_by, status: "failed", reason: err instanceof Error ? err.message : String(err), costUsd: meter.spentUsd, latencyMs: Date.now() - started, checks: [] };
   }
 }
 
@@ -193,7 +196,7 @@ for (const c of cases) {
   for (let run = 1; run <= runs; run++) {
     const cap = budget.capFor(c.kind === "photos" ? visitCap : importCap);
     if (cap == null) {
-      records.push({ caseId: c.id, kind: c.kind, run, status: "skipped", reason: "eval cost cap reached", costUsd: 0, latencyMs: 0, checks: [] });
+      records.push({ caseId: c.id, kind: c.kind, run, labelledBy: c.labelled_by, status: "skipped", reason: "eval cost cap reached", costUsd: 0, latencyMs: 0, checks: [] });
       console.log(`  ${c.id} run ${run}: skipped (eval cost cap reached)`);
       continue;
     }
@@ -211,12 +214,17 @@ for (const c of cases) {
 const date = new Date().toISOString().slice(0, 10);
 const meta = { runsPerCase: runs, model: env.SPARK_MODEL, date, maxCostUsd: maxCost, labelsNote: file.labels_note, outDir, name: name ?? null, fastPath: env.AGENT_FAST_PATH };
 const summary = summarize(records);
+const humanRecords = records.filter((r) => r.labelledBy === "human");
+const humanCases = cases.filter((c) => c.labelled_by === "human").length;
+const headline = humanCases ? summarize(humanRecords) : null;
 await writeFile(
   join(outDir, "report.json"),
-  JSON.stringify({ meta, cases: cases as EvalCase[], records, summary, consistency: consistency(records) }, null, 2),
+  JSON.stringify({ meta: { ...meta, humanCases }, cases: cases as EvalCase[], records, summary, headline, consistency: consistency(records) }, null, 2),
 );
 await writeFile(join(outDir, "report.md"), reportMarkdown(records, cases, meta));
 
-console.log(`\n${summaryTable(summary, { ...meta, cases: cases.length })}\n`);
+console.log(`\n${headlineNote(humanCases, cases.length, runs)}`);
+if (headline) console.log(`\n${summaryTable(headline, { ...meta, cases: humanCases })}\n`);
+if (humanCases < cases.length) console.log(`\nAll cases incl. draft (not headline):\n${summaryTable(summary, { ...meta, cases: cases.length })}\n`);
 console.log(`Report: ${join(outDir, "report.md")}`);
 process.exit(0);
