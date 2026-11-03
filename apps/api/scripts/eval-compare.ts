@@ -18,7 +18,7 @@ if (positionals.length !== 2) {
   console.error("usage: pnpm eval-compare <a/report.json> <b/report.json> [--out compare.md] [--label-a baseline] [--label-b fast-path]");
   process.exit(1);
 }
-const [a, b] = await Promise.all(positionals.map(async (p) => JSON.parse(await readFile(resolve(process.cwd(), p), "utf8")) as Report));
+const [a, b] = await Promise.all(positionals.map(async (p) => JSON.parse(await readFile(resolve(process.env.INIT_CWD ?? process.cwd(), p), "utf8")) as Report));
 const md = compareMarkdown(a!, b!, { a: args["label-a"] ?? a!.meta.name ?? "A", b: args["label-b"] ?? b!.meta.name ?? "B" });
 console.log(md);
-if (args.out) await writeFile(resolve(process.cwd(), args.out), md);
+if (args.out) await writeFile(resolve(process.env.INIT_CWD ?? process.cwd(), args.out), md);
