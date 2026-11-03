@@ -412,3 +412,36 @@ describe("7. fast path (AGENT_FAST_PATH)", () => {
     });
   });
 });
+
+describe("8. count items without a quantity", () => {
+  const rec = (boqItemId: number, photoId: number, extra: Record<string, unknown>) => ({
+    boq_item_id: boqItemId,
+    confidence: 0.8,
+    rationale: "r",
+    evidence: [{ photo_id: photoId }],
+    ...extra,
+  });
+  const qtyOf = async (visitId: number, boqItemId: number) =>
+    (await db.select().from(schema.assessments).where(eq(schema.assessments.visitId, visitId))).find((a) => a.boqItemId === boqItemId)!.qtyDone;
+
+  it("0% → qty_done 0; otherwise percent × planned_qty rounded down, flagged as derived", async () => {
+    const { ctx, visitId, photo, item } = await seed(); // count item, planned 10 nos
+    const zero = (await run("record_assessment", rec(item.id, photo.id, { percent_complete: 0 }), ctx)).output as { qty_done: number; qty_basis: string; notes: string[] };
+    expect(zero.qty_done).toBe(0);
+    expect(zero.qty_basis).toBe("derived: 0% × 10 nos (planned_qty), rounded down = 0 nos");
+    expect(zero.notes.some((n) => n.startsWith("qty_done was not given, so it was derived from percent_complete (0 nos)"))).toBe(true);
+    expect(await qtyOf(visitId, item.id)).toBe(0);
+
+    const some = (await run("record_assessment", rec(item.id, photo.id, { percent_complete: 37 }), ctx)).output as { qty_done: number };
+    expect(some.qty_done).toBe(3); // 3.7 rounded down
+    expect(await qtyOf(visitId, item.id)).toBe(3);
+  });
+
+  it("keeps a counted qty_done as given", async () => {
+    const { ctx, visitId, photo, item } = await seed();
+    const out = (await run("record_assessment", rec(item.id, photo.id, { percent_complete: 50, qty_done: 4 }), ctx)).output as { qty_done: number; qty_basis?: string };
+    expect(out.qty_done).toBe(4);
+    expect(out.qty_basis).toBeUndefined();
+    expect(await qtyOf(visitId, item.id)).toBe(4);
+  });
+});

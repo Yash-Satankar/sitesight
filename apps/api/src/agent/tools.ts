@@ -626,6 +626,11 @@ const handlers: Handlers = {
         : "";
       qtyBasis = `${stagePart}${percent}% × ${item.plannedQty} ${item.unit} (planned_qty) = ${qtyDone} ${item.unit}`;
       ignoreModelQty("as percent_complete × planned_qty");
+    } else if (item.measureMode === "count" && args.qty_done == null) {
+      // A count item with a percent but no count: derive whole units, rounded down, and say so.
+      qtyDone = percent === 0 ? 0 : Math.floor((percent / 100) * item.plannedQty);
+      qtyBasis = `derived: ${percent}% × ${item.plannedQty} ${item.unit} (planned_qty), rounded down = ${qtyDone} ${item.unit}`;
+      notes.push(`qty_done was not given, so it was derived from percent_complete (${qtyDone} ${item.unit}). Pass qty_done for count items when you counted.`);
     }
 
     const values = {
