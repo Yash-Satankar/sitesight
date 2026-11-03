@@ -33,3 +33,26 @@ deploy-secrets.local.txt
 
 # Vercel project link (meta-proxy)
 .vercel
+
+# Client drawings, site photos, voice notes and spreadsheets never go in the repo, wherever they land.
+# Only the README screenshots (docs/img/) and the web app's public icons are allowed.
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.heic
+*.wav
+*.webm
+*.m4a
+*.mp3
+*.ogg
+*.xlsx
+*.xls
+!docs/img/*.png
+!apps/web/public/*.png
+
+# Local state, notes and secrets, anywhere (e.g. verify-state.local.json, *.local.md)
+*.local.*
+meta-support-note*.md
