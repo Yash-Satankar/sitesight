@@ -313,7 +313,7 @@ const demoResidenceId = demoResidence as number | null;
 if (seededVisit && demoResidenceId) {
   const demoResidenceVisit = seededVisit;
   const items = (await http<ProjectDetail>("GET", `/projects/${demoResidenceId}`)).boqItems;
-  console.log(`\nDemoResidence visit 1 (${demoResidenceVisit.visitDate}, ${demoResidenceVisit.status}):`);
+  console.log(`\nDemo Residence visit 1 (${demoResidenceVisit.visitDate}, ${demoResidenceVisit.status}):`);
   console.log(`  ${"item".padEnd(10)} ${"%".padStart(5)}  ${"stage".padEnd(14)} ${"basis".padEnd(9)} ${"conf".padStart(4)}  status`);
   for (const a of demoResidenceVisit.assessments as Assessment[]) {
     const code = items.find((b) => b.id === a.boqItemId)?.code ?? `#${a.boqItemId}`;
