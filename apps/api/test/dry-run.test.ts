@@ -144,7 +144,8 @@ describe("agent dry run", () => {
 
     // Results
     expect(text).toMatch(/BOQ item +\| status +\| % done \| qty_done +\| conf\. \| evidence +\| rationale/);
-    expect(text).toMatch(/GF-1 RCC columns, ground.*\| assessed +\| 25% +\| — +\| 0\.72 +\| \d+ +\| 4 of 16 ground-floor columns/);
+    // Recorded at 25% with no count: code derives 25% × 16 = 4 nos.
+    expect(text).toMatch(/GF-1 RCC columns, ground.*\| assessed +\| 25% +\| 4\b[^|]*\| 0\.72 +\| \d+ +\| 4 of 16 ground-floor columns/);
     expect(text).toMatch(/PB-1 Plinth beam.*\| not assessed +\| — /);
     expect(text).toMatch(/GF-2 Brickwork.*\| awaiting photo \(ask-back #\d+\) +\| — .*\| requested: Square-on photo of the whole bay/);
     expect(text).toMatch(/\[open\] #\d+ GF-West \(for GF-2\): Square-on photo of the whole bay between columns C3 and C4/);
