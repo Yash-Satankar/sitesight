@@ -4,15 +4,15 @@
  * Logs in through the login screen with DEMO_PASSWORD from deploy-secrets.local.txt (never printed), then captures
  * at phone width into docs/img/:
  *   trace-rejections.png  the live trace of a visit whose detections were rejected (prefers --trace-project)
- *   drawing-import.png    a finished drawing import with its page sources (title blocks blurred)
+ *   drawing-import.png    a finished drawing import with its page sources (title blocks blurred by the server)
  *   review-card.png       the first review card of --project's second visit
- * Title blocks of client drawings: the right and bottom strips of every drawing thumbnail are blurred.
+ * Title blocks of client drawings are blurred by the server (it only serves a redacted copy of each page); the script
+ * refuses to capture the drawing import from a server that would still serve originals.
  */
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { createRequire } from "node:module";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const { values: args } = parseArgs({
@@ -31,7 +31,6 @@ if (!args["base-url"]) {
 }
 const BASE = args["base-url"].replace(/\/+$/, "");
 const outDir = resolve(repoRoot, args.out!);
-const sharp = createRequire(join(repoRoot, "apps/api/package.json"))("sharp") as typeof import("sharp");
 
 const password = /DEMO_PASSWORD=(\S+)/.exec(await readFile(resolve(repoRoot, args["password-file"]!), "utf8"))?.[1];
 if (!password) throw new Error(`No DEMO_PASSWORD= line in ${args["password-file"]}`);
@@ -114,28 +113,18 @@ for (const p of traceCandidates) {
 }
 if (!traceDone) console.warn("No visit with rejected detections found: trace-rejections.png not written");
 
-// 2. Drawing import with page sources; blur title blocks on every drawing thumbnail in view.
+// 2. Drawing import with page sources (the server blurs title blocks in every page image it serves).
 if (drawing) {
   await page.goto(`${BASE}/projects/${drawing.projectId}/boq?import=${drawing.importId}`);
   await page.getByText("Proposed BOQ").waitFor({ timeout: 20_000 });
   await settle();
+  const imp = (await (await page.request.get(`${BASE}/api/projects/${drawing.projectId}/drawings/${drawing.importId}`)).json()) as { pages: { imageUrl: string }[] };
+  if (!imp.pages.every((p) => /\.view\.png(\?|$)/.test(p.imageUrl))) {
+    throw new Error("This server serves original drawing pages (title blocks not blurred): deploy first, then re-run.");
+  }
   const file = join(outDir, "drawing-import.png");
-  const shot = await page.screenshot({ fullPage: false });
-  // Only thumbnails actually visible: skip ones off screen or covered (e.g. by the fixed Save bar).
-  const thumbs = await page.locator("img[src*='/storage/'][src*='thumbs']").evaluateAll((els) =>
-    els
-      .filter((e) => {
-        const r = e.getBoundingClientRect();
-        if (r.width === 0 || r.bottom <= 0 || r.top >= innerHeight || r.right <= 0 || r.left >= innerWidth) return false;
-        const x = Math.min(Math.max(r.left + r.width / 2, 1), innerWidth - 1);
-        const y = Math.min(Math.max(r.top + r.height / 2, 1), innerHeight - 1);
-        return document.elementFromPoint(x, y) === e;
-      })
-      .map((e) => e.getBoundingClientRect())
-      .map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })),
-  );
-  await writeBlurred(shot, thumbs, 2, file);
-  saved.push(`${file}  (${thumbs.length} thumbnail(s) with title blocks blurred)`);
+  await page.screenshot({ path: file, fullPage: false });
+  saved.push(`${file}  (${imp.pages.length} pages, title blocks blurred by the server)`);
 } else {
   console.warn("No finished drawing import found: drawing-import.png not written");
 }
@@ -150,26 +139,3 @@ saved.push(`${reviewFile}  (${main.name}, visit ${reviewVisit.visitDate})`);
 
 await browser.close();
 console.log(`Saved:\n  ${saved.join("\n  ")}`);
-
-/** Blur the title-block strips (right 24 %, bottom 24 %) of each thumbnail rect (CSS px) in a screenshot. */
-async function writeBlurred(png: Buffer, rects: { x: number; y: number; w: number; h: number }[], scale: number, file: string) {
-  const img = sharp(png);
-  const { width = 0, height = 0 } = await img.metadata();
-  const overlays: { input: Buffer; left: number; top: number }[] = [];
-  for (const r of rects) {
-    const strips = [
-      { x: r.x + r.w * 0.76, y: r.y, w: r.w * 0.24, h: r.h },
-      { x: r.x, y: r.y + r.h * 0.76, w: r.w, h: r.h * 0.24 },
-    ];
-    for (const s of strips) {
-      const left = Math.max(0, Math.round(s.x * scale));
-      const top = Math.max(0, Math.round(s.y * scale));
-      const w = Math.min(width - left, Math.round(s.w * scale));
-      const h = Math.min(height - top, Math.round(s.h * scale));
-      if (w < 4 || h < 4) continue;
-      const input = await sharp(png).extract({ left, top, width: w, height: h }).blur(12).toBuffer();
-      overlays.push({ input, left, top });
-    }
-  }
-  await sharp(png).composite(overlays).png().toFile(file);
-}
