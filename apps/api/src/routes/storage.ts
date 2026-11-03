@@ -1,5 +1,6 @@
 import express, { Router } from "express";
 import { extname } from "node:path";
+import { VOICE_MAX_BYTES, voiceTooLargeMessage } from "@sitesight/shared";
 import { HttpError } from "../lib/http.js";
 import { getObject, putObject, verifyLocalUrl } from "../services/storage.js";
 
@@ -40,6 +41,7 @@ storageRouter.put("/storage/*key", express.raw({ type: () => true, limit: "25mb"
   check(req, key, "PUT");
   const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   if (!body.length) throw new HttpError(400, "Empty upload");
+  if (/^visits\/\d+\/voice\//.test(key) && body.length > VOICE_MAX_BYTES) throw new HttpError(413, voiceTooLargeMessage(body.length));
   await putObject(key, body, req.get("content-type") ?? "application/octet-stream");
   res.status(200).end();
 });

@@ -321,7 +321,7 @@ export const spendLedger = pgTable(
   {
     id: serial("id").primaryKey(),
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
-    kind: text("kind", { enum: ["agent_run", "drawing_import", "boq_parse"] }).notNull(),
+    kind: text("kind", { enum: ["agent_run", "drawing_import", "boq_parse", "health_check"] }).notNull(),
     projectId: integer("project_id"),
     visitId: integer("visit_id"),
     costUsd: numeric("cost_usd", { mode: "number" }).notNull(),

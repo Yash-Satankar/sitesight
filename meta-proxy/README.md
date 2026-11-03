@@ -9,6 +9,10 @@ key works from India. This Vercel project, pinned to `bom1` (Mumbai), forwards o
 Each request must send `X-Meta-Proxy-Secret`; the real `META_API_KEY` is held here and replaces the caller's
 Authorization. Bodies are capped at 4.4 MB (Vercel's limit is 4.5 MB) and never logged. Anything else gets 401/404/405.
 
+Timeout: `maxDuration` 300 s in [vercel.json](vercel.json), the most the Hobby plan allows with Fluid compute (the
+project's default is also 300 s; set explicitly so it can't drift). Measured on 2026-11-03 from the production
+container: a 7,522-token Spark answer took 106 s, a drawing-page extraction 31 s, SAM 3.1 under 4 s.
+
 Vercel env: `META_API_KEY`, `META_PROXY_SECRET`. SiteSight API env: `META_BASE_URL=https://<proxy>.vercel.app/v1`,
 `META_PROXY_SECRET` (same value).
 

@@ -6,7 +6,8 @@ import { sql as dsql } from "drizzle-orm";
 import { env } from "./config.js";
 import { db } from "./db/client.js";
 import { errorHandler } from "./lib/http.js";
-import { requireAuth } from "./lib/auth.js";
+import { SESSION_COOKIE, authRequired, readCookie, requireAuth, validSession } from "./lib/auth.js";
+import { deepHealth } from "./lib/deep-health.js";
 import { isAllowedOrigin } from "./lib/origins.js";
 import { authRouter } from "./routes/auth.js";
 import { spendRouter } from "./routes/spend.js";
@@ -32,13 +33,26 @@ export interface AppOptions {
   webDir?: string | null;
 }
 
-async function healthz(_req: express.Request, res: express.Response) {
+async function healthz(req: express.Request, res: express.Response) {
+  const deep = req.query.deep === "1";
+  // The plain check stays public (Railway's health check); the deep one spends a little Meta credit, so it needs login.
+  if (deep && authRequired() && !validSession(readCookie(req.get("cookie"), SESSION_COOKIE))) {
+    res.status(401).json({ error: "Log in to use the demo.", authRequired: true });
+    return;
+  }
   try {
     await db.execute(dsql`select 1`);
-    res.json({ ok: true });
   } catch {
     res.status(503).json({ ok: false, error: "database unavailable" });
+    return;
   }
+  if (!deep) {
+    res.json({ ok: true });
+    return;
+  }
+  const result = await deepHealth();
+  res.set("Cache-Control", "no-store");
+  res.status(result.ok ? 200 : 503).json({ ...result, db: { ok: true } });
 }
 
 /** Every API route, with CORS, the write-origin check, body limits and the demo login. */

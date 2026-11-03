@@ -183,3 +183,9 @@ export type PatchAssessmentBody = z.infer<typeof PatchAssessmentBody>;
 
 export const ReportResponse = z.object({ reportId: z.number().int(), downloadUrl: z.string() });
 export type ReportResponse = z.infer<typeof ReportResponse>;
+
+/** Voice notes: the Capture screen stops recording at 60 s (16 kHz mono WAV ≈ 1.9 MB); the server refuses bigger uploads. */
+export const VOICE_MAX_SECONDS = 60;
+export const VOICE_MAX_BYTES = 4 * 1024 * 1024;
+export const voiceTooLargeMessage = (bytes: number) =>
+  `Voice note too large (${(bytes / 1024 / 1024).toFixed(1)} MB). The limit is 4 MB: record a note under 60 seconds.`;

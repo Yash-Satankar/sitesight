@@ -59,6 +59,10 @@ describe("transcribe", () => {
     vi.stubGlobal("fetch", fetchSpy);
     await expect(transcribe(Buffer.alloc(100), "note.webm")).rejects.toBeInstanceOf(VoiceFormatError);
     expect(fetchSpy).not.toHaveBeenCalled();
+    // Over 4 MB (about 2 minutes at 16 kHz): refused before the call, even when the WAV header is fine.
+    const long = Buffer.from(encodeWav16(new Float32Array(2_100_001), 16000));
+    await expect(transcribe(long)).rejects.toThrow(/^Voice note too large \(4\.0 MB\)\. The limit is 4 MB/);
+    expect(fetchSpy).not.toHaveBeenCalled();
 
     vi.stubGlobal("fetch", async () => new Response('{"type":"invalid_request"}', { status: 400 }));
     await expect(transcribe(Buffer.from(encodeWav16(tone(0.2), 16000)))).rejects.toThrow('Voice transcription failed: HTTP 400 {"type":"invalid_request"}');

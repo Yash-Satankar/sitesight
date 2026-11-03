@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Camera, Check, ImagePlus, Mic, Play, Trash2, Upload } from "lucide-react";
+import { VOICE_MAX_SECONDS } from "@sitesight/shared";
 import { api, apiUrl, uploadFile } from "../lib/api";
 import { toVoiceWav } from "../lib/wav";
 import { useAsync } from "../lib/useAsync";
@@ -221,11 +222,22 @@ function VoiceRecorder({ value, onChange }: { value: Blob | null; onChange: (b: 
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
 
+  const [hitLimit, setHitLimit] = useState(false);
+
   useEffect(() => {
     if (!recording) return;
     setSeconds(0);
+    setHitLimit(false);
     const started = Date.now();
-    const t = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 250);
+    const t = setInterval(() => {
+      const s = Math.floor((Date.now() - started) / 1000);
+      setSeconds(Math.min(s, VOICE_MAX_SECONDS));
+      // Auto-stop at the limit: Meta's push-to-talk transcription and our 4 MB upload cap.
+      if (s >= VOICE_MAX_SECONDS) {
+        setHitLimit(true);
+        stop();
+      }
+    }, 250);
     return () => clearInterval(t);
   }, [recording]);
 
@@ -260,7 +272,9 @@ function VoiceRecorder({ value, onChange }: { value: Blob | null; onChange: (b: 
     setRecording(false);
   }
 
-  const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const clock = `${fmt(seconds)} / ${fmt(VOICE_MAX_SECONDS)}`;
+  const nearLimit = VOICE_MAX_SECONDS - seconds <= 10;
 
   return (
     <section className="space-y-2">
@@ -277,12 +291,22 @@ function VoiceRecorder({ value, onChange }: { value: Blob | null; onChange: (b: 
         <Mic className={`h-6 w-6 ${recording ? "animate-pulse" : ""}`} aria-hidden />
         {recording ? (
           <>
-            <span className="num">{clock}</span> Recording · release to stop
+            <span className={`num ${nearLimit ? "rounded bg-white px-1.5 text-red-700" : ""}`}>{clock}</span> Recording · release to stop
           </>
         ) : (
-          "Hold to add a voice note"
+          `Hold to add a voice note (up to ${VOICE_MAX_SECONDS} s)`
         )}
       </button>
+      {recording && (
+        <div className="h-1.5 overflow-hidden rounded-full bg-slate-200" aria-hidden>
+          <div className="h-full bg-red-600 transition-[width] duration-200" style={{ width: `${(seconds / VOICE_MAX_SECONDS) * 100}%` }} />
+        </div>
+      )}
+      {hitLimit && !recording && (
+        <p className="text-sm text-slate-600" role="status">
+          Stopped at {VOICE_MAX_SECONDS} seconds, the voice note limit.
+        </p>
+      )}
       {value && !recording && (
         <div className="flex items-center gap-2">
           <audio controls src={URL.createObjectURL(value)} className="h-12 min-w-0 flex-1" />

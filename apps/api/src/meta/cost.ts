@@ -17,7 +17,7 @@ export interface CostEntry {
   costUsd: number;
 }
 
-export type SpendKind = "agent_run" | "drawing_import" | "boq_parse";
+export type SpendKind = "agent_run" | "drawing_import" | "boq_parse" | "health_check";
 
 /**
  * Append one cost to the spend ledger (survives project deletion; the daily cap reads it). Zero costs are skipped.

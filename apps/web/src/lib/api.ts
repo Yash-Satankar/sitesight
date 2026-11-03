@@ -110,7 +110,10 @@ export async function uploadFile(visitId: number, blob: Blob, kind: "photo" | "v
     kind,
   });
   const res = await fetch(apiUrl(uploadUrl), { method: "PUT", body: blob, headers: { "Content-Type": contentType } });
-  if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+  if (!res.ok) {
+    const err = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(err?.error ?? `Upload failed (${res.status})`);
+  }
   return storageKey;
 }
 

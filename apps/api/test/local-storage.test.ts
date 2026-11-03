@@ -63,6 +63,18 @@ describe("storage routes (upload and download over HTTP)", () => {
     expect(Buffer.from(await get.arrayBuffer())).toEqual(bytes);
   });
 
+  it("refuses voice notes over 4 MB with a clear message (photos may be bigger)", async () => {
+    const big = Buffer.alloc(4 * 1024 * 1024 + 1, 1);
+    const voice = await fetch(base + (await storage.presignPut("visits/7/voice/long.wav", "audio/wav")), { method: "PUT", body: big, headers: { "Content-Type": "audio/wav" } });
+    expect(voice.status).toBe(413);
+    expect((await voice.json()).error).toBe("Voice note too large (4.0 MB). The limit is 4 MB: record a note under 60 seconds.");
+    await expect(storage.getObject("visits/7/voice/long.wav")).rejects.toThrow();
+    const okVoice = await fetch(base + (await storage.presignPut("visits/7/voice/short.wav", "audio/wav")), { method: "PUT", body: big.subarray(0, 4 * 1024 * 1024), headers: { "Content-Type": "audio/wav" } });
+    expect(okVoice.status).toBe(200);
+    const photo = await fetch(base + (await storage.presignPut("visits/7/photos/big.jpg", "image/jpeg")), { method: "PUT", body: big, headers: { "Content-Type": "image/jpeg" } });
+    expect(photo.status).toBe(200);
+  });
+
   it("refuses unsigned, wrongly signed and cross-method requests", async () => {
     const key = "visits/7/photos/b.jpg";
     const putUrl = await storage.presignPut(key, "image/jpeg");

@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { and, eq } from "drizzle-orm";
-import { PresignBody, RegisterPhotoBody, type PresignResponse } from "@sitesight/shared";
+import { PresignBody, RegisterPhotoBody, VOICE_MAX_BYTES, voiceTooLargeMessage, type PresignResponse } from "@sitesight/shared";
 import { db, schema } from "../db/client.js";
 import { HttpError, intParam, parse } from "../lib/http.js";
 import { getVisitOr404 } from "../lib/queries.js";
 import { loadNormalizedPhoto } from "../services/images.js";
 import { enqueue } from "../services/jobs.js";
 import { assertAskBackOpenInProject } from "../services/ask-backs.js";
-import { newKey, presignPut } from "../services/storage.js";
+import { deleteObject, getObject, newKey, presignPut } from "../services/storage.js";
 
 export const photosRouter = Router();
 
@@ -29,6 +29,16 @@ photosRouter.post("/visits/:id/photos", async (req, res) => {
   if (!body.storageKey.startsWith(`visits/${visitId}/photos/`)) throw new HttpError(400, "storageKey does not belong to this visit");
   if (body.voiceNoteKey && !body.voiceNoteKey.startsWith(`visits/${visitId}/voice/`)) {
     throw new HttpError(400, "voiceNoteKey does not belong to this visit");
+  }
+  if (body.voiceNoteKey) {
+    // Covers R2 uploads too, where the browser PUTs straight to the bucket.
+    const audio = await getObject(body.voiceNoteKey).catch(() => {
+      throw new HttpError(400, "Voice note not found: upload it again");
+    });
+    if (audio.length > VOICE_MAX_BYTES) {
+      await deleteObject(body.voiceNoteKey);
+      throw new HttpError(413, voiceTooLargeMessage(audio.length));
+    }
   }
   const [zone] = await db
     .select()

@@ -83,6 +83,10 @@ proxy on Vercel pinned to Mumbai: [meta-proxy/](meta-proxy/README.md). It forwar
 3. `vercel deploy --prod` → `https://sitesight-meta-proxy.vercel.app` (region `bom1`).
 4. Railway variables: `META_BASE_URL=https://sitesight-meta-proxy.vercel.app/v1`, `META_PROXY_SECRET=<same value>`.
 
+Functions may run 300 s (`maxDuration`, the Hobby + Fluid maximum); the longest calls (long Spark answers) take about
+2 minutes. Before a demo, log in and open `https://<domain>/healthz?deep=1`: it makes one tiny Spark call through the
+proxy and answers `{"ok":true,"spark":{"ok":true,"latencyMs":…,"via":"proxy"}}` (503 with an HTTP status if Meta fails).
+
 ## Environment variables
 
 | Variable | Example | Notes |
@@ -108,7 +112,8 @@ proxy on Vercel pinned to Mumbai: [meta-proxy/](meta-proxy/README.md). It forwar
 
 ## Post-deploy checklist
 
-1. `curl https://<domain>/healthz` → `{"ok":true}`; `curl https://<domain>/api/projects` → `401`.
+1. `curl https://<domain>/healthz` → `{"ok":true}`; `curl https://<domain>/api/projects` → `401`. Logged in,
+   `/healthz?deep=1` checks the Meta path end to end (one tiny Spark call, logged as `health_check` spend).
 2. Open `https://<domain>` → "Demo access" → log in with `DEMO_PASSWORD` → Projects with "AI spend today".
 3. Create a project, a zone and a BOQ.
 4. New visit → take/upload a photo → the thumbnail appears.

@@ -1,3 +1,4 @@
+import { VOICE_MAX_BYTES, voiceTooLargeMessage } from "@sitesight/shared";
 import { env } from "../config.js";
 
 /**
@@ -25,6 +26,7 @@ export function wavProblem(audio: Buffer): string | null {
 }
 
 export async function transcribe(audio: Buffer, filename = "note.wav"): Promise<string> {
+  if (audio.length > VOICE_MAX_BYTES) throw new VoiceFormatError(voiceTooLargeMessage(audio.length));
   const problem = wavProblem(audio);
   if (problem) throw new VoiceFormatError(`Voice note can't be transcribed: ${problem}`);
   if (!env.META_API_KEY || !env.META_BASE_URL) throw new Error("META_API_KEY and META_BASE_URL must be set");
