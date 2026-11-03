@@ -261,6 +261,19 @@ function describe(name: string, a: Obj, rawResult: unknown, code: (id: unknown) 
         body: str(a.reason) ? `Why: ${a.reason}` : undefined,
       };
     }
+    case "record_assessments": {
+      // Each item also gets its own record_assessment card; this one just says how the batch went.
+      const n = Array.isArray(a.items) ? a.items.length : 0;
+      if (!done) return { tone: "neutral", icon: "assess", title: `Recording ${n} assessments…` };
+      const failed = num(r.failed) ?? 0;
+      const errors = (Array.isArray(r.results) ? r.results : []).map(obj).filter((x) => x.ok === false);
+      return {
+        tone: failed ? "attention" : "done",
+        icon: "assess",
+        title: `Recorded ${num(r.recorded) ?? 0} of ${n} assessments in one go`,
+        body: errors.length ? errors.map((x) => `${code(x.boq_item_id)}: ${str(x.error) ?? "error"}`).join("\n") : undefined,
+      };
+    }
     case "finish":
       return { tone: "done", icon: "finish", title: done ? "Finished" : "Finishing…", body: str(a.summary) ?? str(r.summary) ?? undefined };
     default:
@@ -274,6 +287,7 @@ const VERB: Record<string, (photo: string) => string> = {
   measure: (p) => `measure ${p}`,
   view_photo: (p) => `open ${p}`,
   record_assessment: () => "record the assessment",
+  record_assessments: () => "record the assessments",
   request_photo: () => "request the photo",
   get_previous_assessment: () => "read last visit",
   list_boq_items: () => "read the BOQ",
@@ -292,6 +306,8 @@ function noticeCopy(name: string | null, p: Obj): { title: string; body?: string
       return { title: "Reminded the agent to keep using its tools" };
     case "step_budget":
       return { title: "Stopped: step budget used up" };
+    case "pre_segmented":
+      return { title: "Photos checked for columns and brickwork before the agent started", body: str(p.message) ?? undefined };
     default:
       return { title: str(p.message) ?? name ?? "Note" };
   }

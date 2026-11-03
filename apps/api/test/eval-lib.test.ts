@@ -10,6 +10,7 @@ import {
   scoreDrawingRun,
   scorePhotoRun,
   summarize,
+  compareVerdict,
   summaryTable,
   type DrawingCase,
   type PhotoCase,
@@ -154,7 +155,7 @@ describe("consistency, summary and report", () => {
   const records = [
     rec("c1", 1, { "SLB-GF stage": "reinforcement", "PB-1 basis": "inferred" }),
     rec("c1", 2, { "SLB-GF stage": "reinforcement", "PB-1 basis": "observed" }),
-    rec("c1", 3, { "SLB-GF stage": "shuttering", "PB-1 basis": "inferred" }, { costUsd: 0.3 }),
+    rec("c1", 3, { "SLB-GF stage": "shuttering", "PB-1 basis": "inferred" }, { costUsd: 0.3, turns: 9 }),
     rec("c2", 1, { "SLB-GF stage": "reinforcement" }),
     { caseId: "c2", kind: "photos" as const, run: 2, status: "skipped" as const, reason: "eval cost cap reached", costUsd: 0, latencyMs: 0, checks: [] },
   ];
@@ -186,6 +187,7 @@ describe("consistency, summary and report", () => {
       costUsd: 0.9,
       avgCostPerRunUsd: 0.225,
       avgLatencyMs: 60000,
+      avgTurns: 9, // only runs that report turns
     });
     const table = summaryTable(s, { runsPerCase: 3, cases: 2, model: "muse-spark-1.3", date: "2026-11-01" });
     expect(table.split("\n").slice(0, 5)).toEqual([
@@ -198,6 +200,8 @@ describe("consistency, summary and report", () => {
     expect(table).toContain("| SAM detections rejected by the agent | 4/16 (25%) |");
     expect(table).toContain("| Same answer across runs | 0/2 (0%) |");
     expect(table).toContain("| Total eval cost | $0.90 |");
+    expect(table).toContain("| Model turns per run (avg) | 9 |");
+    expect(summaryTable(s, { runsPerCase: 3, cases: 2, model: "m", date: "d", fastPath: true }).split("\n")[0]).toContain("· AGENT_FAST_PATH=true");
   });
 
   it("writes a markdown report with per-case runs, answers and differing runs", () => {
@@ -212,8 +216,8 @@ describe("consistency, summary and report", () => {
     expect(md).toContain("# SiteSight eval — 2026-11-01");
     expect(md).toContain("> Labels: draft labels");
     expect(md).toContain("## c1");
-    expect(md).toContain("| 3 | done | $0.30 | 60 s | 0/2 |");
-    expect(md).toContain("| 2 | skipped (eval cost cap reached) | $0.00 | 0 s | — |");
+    expect(md).toContain("| 3 | done | $0.30 | 60 s | 9 | 0/2 |");
+    expect(md).toContain("| 2 | skipped (eval cost cap reached) | $0.00 | 0 s | — | — |");
     expect(md).toContain("- SLB-GF stage: reinforcement / reinforcement / shuttering");
     expect(md).toContain("**Should reject:**");
   });
@@ -228,5 +232,17 @@ describe("EvalBudget", () => {
     b.add(0.81); // a run can overshoot by its last call
     expect(b.remaining()).toBe(0);
     expect(b.capFor(1.5)).toBeNull();
+  });
+});
+
+describe("compareVerdict", () => {
+  const base = summarize([rec("c1", 1, { "SLB-GF stage": "reinforcement" })]);
+  const with_ = (over: Partial<typeof base>) => ({ ...base, ...over });
+  it("keeps the new setting only if no accuracy metric drops and latency improves", () => {
+    expect(compareVerdict(base, with_({ avgLatencyMs: base.avgLatencyMs! - 1000 }))).toEqual({ keep: true, drops: [], latencyImproved: true });
+    expect(compareVerdict(base, with_({ avgLatencyMs: base.avgLatencyMs! + 1000 })).keep).toBe(false);
+    const worse = compareVerdict(base, with_({ avgLatencyMs: 1, stage: { pass: 0, total: base.stage.total } }));
+    expect(worse).toMatchObject({ keep: false, drops: ["Stage, exact match"] });
+    expect(compareVerdict(base, with_({ avgLatencyMs: 1, runs: { ...base.runs, failed: 1 } })).drops).toEqual(["Failed runs"]);
   });
 });

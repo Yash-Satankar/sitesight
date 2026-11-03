@@ -303,3 +303,112 @@ describe("6. graceful wrap-up", () => {
     expect(steps.filter((s) => s.kind === "tool_result").length).toBeGreaterThan(20);
   });
 });
+
+describe("7. fast path (AGENT_FAST_PATH)", () => {
+  const withFastPath = async (on: boolean, fn: () => Promise<void>) => {
+    const before = env.AGENT_FAST_PATH;
+    env.AGENT_FAST_PATH = on;
+    try {
+      await fn();
+    } finally {
+      env.AGENT_FAST_PATH = before;
+    }
+  };
+  const toolNames = () => (create.mock.calls.find(([b]) => b.model !== env.SAM_MODEL)![0] as { tools: { name: string }[] }).tools.map((t) => t.name);
+  async function addVisualItem(projectId: number) {
+    const [item] = await db
+      .insert(schema.boqItems)
+      .values({ projectId, code: "2.1", description: "Plaster", unit: "m2", plannedQty: 40, measureMode: "visual_only" })
+      .returning();
+    return item!;
+  }
+  const assessment = (boqItemId: number, photoId: number, extra: Record<string, unknown> = {}) => ({
+    boq_item_id: boqItemId,
+    percent_complete: 40,
+    confidence: 0.65,
+    rationale: "visible in the photo",
+    evidence: [{ photo_id: photoId }],
+    ...extra,
+  });
+
+  it("off: no pre-segmentation, no record_assessments tool, same behaviour as before", async () => {
+    await withFastPath(false, async () => {
+      const { ctx, visitId } = await seed();
+      script([() => call(["finish", { summary: "done" }])], { "concrete column": SAM_TWO });
+      expect(await runAgent(visitId)).toBe("assessed");
+      expect(create.mock.calls.filter(([b]) => b.model === env.SAM_MODEL)).toHaveLength(0);
+      expect(images(inputs[0]!)).toBe(0);
+      expect(toolNames()).not.toContain("record_assessments");
+      expect(errorOf(await run("record_assessments", { items: [] }, ctx))).toMatch(/^Unknown tool "record_assessments"/);
+    });
+  });
+
+  it("on: segments every photo for the BOQ's targets before turn 1 and attaches the masked overlay", async () => {
+    await withFastPath(true, async () => {
+      const { visitId, photo } = await seed();
+      let samBeforeFirstTurn = 0;
+      script(
+        [
+          () => {
+            samBeforeFirstTurn = create.mock.calls.filter(([b]) => b.model === env.SAM_MODEL).length;
+            return call(["finish", { summary: "done" }]);
+          },
+        ],
+        { "concrete column": SAM_TWO },
+      );
+      expect(await runAgent(visitId)).toBe("assessed");
+      expect(samBeforeFirstTurn).toBe(1); // one target (column), one prompt
+      const first = inputs[0]!;
+      expect(images(first)).toBe(1);
+      const ctxText = texts(first)[0]!;
+      expect(ctxText).toMatch(/Pre-segmentation \(done by code before this turn, fast path\) for targets column/);
+      const segs = await db.select().from(schema.segments).where(eq(schema.segments.photoId, photo.id));
+      expect(segs).toHaveLength(2);
+      for (const s of segs) expect(ctxText).toContain(`"segment_id": ${s.id}`);
+      expect(toolNames()).toContain("record_assessments");
+      const { steps } = await stepsOfLatestRun(visitId);
+      expect(steps.slice(0, 5).map((s) => `${s.kind}:${s.name}`)).toEqual([
+        "tool_call:segment_photo",
+        "tool_result:segment_photo",
+        "tool_call:view_photo",
+        "tool_result:view_photo",
+        "notice:pre_segmented",
+      ]);
+    });
+  });
+
+  it("record_assessments: items succeed or fail independently; finish waits while any failed", async () => {
+    await withFastPath(true, async () => {
+      const { visitId, photo, item, ctx } = await seed();
+      const plaster = await addVisualItem(ctx.projectId);
+      const batch1 = [
+        assessment(item.id, photo.id),
+        assessment(999_999, photo.id), // unknown item
+        { boq_item_id: plaster.id, rationale: "no confidence", evidence: [{ photo_id: photo.id }] }, // invalid
+      ];
+      let firstResult: { recorded: number; failed: number; results: { index: number; ok: boolean; error?: string }[] } | undefined;
+      script([
+        () => call(["record_assessments", { items: batch1 }], ["finish", { summary: "too early" }]),
+        (input) => {
+          firstResult = toolOutputs(input)[0];
+          return call(["record_assessments", { items: [assessment(plaster.id, photo.id)] }], ["finish", { summary: "done" }]);
+        },
+      ]);
+      expect(await runAgent(visitId)).toBe("assessed");
+      expect(inputs).toHaveLength(2); // finish ran in the same turn as the second batch
+      expect(firstResult).toMatchObject({ recorded: 1, failed: 2 });
+      expect(firstResult!.results.map((r) => r.ok)).toEqual([true, false, false]);
+      expect(firstResult!.results[1]!.error).toMatch(/boq_item_id 999999 not found/);
+      expect(firstResult!.results[2]!.error).toMatch(/^Invalid arguments: confidence/);
+      const refusedFinish = toolOutputs(inputs[1]!)[1];
+      expect(refusedFinish.error).toMatch(/^2 item\(s\) in this turn's record_assessments failed/);
+      const rows = await db.select().from(schema.assessments).where(eq(schema.assessments.visitId, visitId));
+      expect(rows.map((r) => r.boqItemId).sort()).toEqual([item.id, plaster.id].sort());
+      // Visual-only caps still apply per item.
+      expect(rows.find((r) => r.boqItemId === plaster.id)!.confidence).toBeLessThanOrEqual(env.VISUAL_ONLY_MAX_CONFIDENCE);
+      // Each item also shows up as its own record_assessment in the trace.
+      const { steps } = await stepsOfLatestRun(visitId);
+      expect(steps.filter((s) => s.kind === "tool_result" && s.name === "record_assessment")).toHaveLength(4);
+    });
+  });
+});

@@ -6,7 +6,23 @@ const TARGET_LIST = Object.entries(SEGMENT_TARGETS)
   .map(([name, t]) => `"${name}" (${t.description}, for ${t.measureMode} items)`)
   .join(" and ");
 
-export function systemPrompt(): string {
+const SEGMENT_FIRST = `- Segment first, then look. For a photo you will segment, do not call plain view_photo first: call segment_photo,
+  then view_photo with with_masks=true. Use plain view_photo only for photos you need for visual_only items.`;
+
+const SEGMENT_FAST = `- Photos are already segmented: the context lists every photo's instances for the BOQ's segment targets (segment ids,
+  scores), and the masked overlays of the first photos are attached. Go straight to verify_segments for those photos;
+  for a photo whose overlay is not attached, call view_photo(with_masks=true) first. Call segment_photo only to
+  re-segment. Use plain view_photo only for photos you need for visual_only items.`;
+
+const RECORD_ONE = `- Record one assessment per BOQ item with record_assessment. percent_complete is 0–100 and never above 100.`;
+
+const RECORD_BATCH = `- Record all assessments in ONE record_assessments call (one entry per BOQ item, each with the same fields and rules as
+  record_assessment; inferred items after the observed item they rely on), then call finish in the same turn.
+  If some entries fail, the result says which: fix and resend only those, then finish. percent_complete is 0–100 and never above 100.`;
+
+/** fastPath (AGENT_FAST_PATH): photos are pre-segmented before the first turn and assessments are recorded in one batch. */
+export function systemPrompt(opts: { fastPath?: boolean } = {}): string {
+  const fast = opts.fastPath === true;
   return `You are SiteSight, a construction site progress auditor working for a small contractor.
 Your job: for every BOQ (bill of quantities) item relevant to the photos of this site visit,
 estimate how much work is complete, with evidence the site engineer can check.
@@ -16,8 +32,7 @@ Rules:
 - Use the tools. Start with list_boq_items and list_photos, then work zone by zone.
 - segment_photo only finds ${TARGET_LIST}. Use it for items whose segment_targets are not empty.
   Everything else (reinforcement steel, slabs, plaster, openings, waterproofing, …) is "visual_only": judge it from view_photo.
-- Segment first, then look. For a photo you will segment, do not call plain view_photo first: call segment_photo,
-  then view_photo with with_masks=true. Use plain view_photo only for photos you need for visual_only items.
+${fast ? SEGMENT_FAST : SEGMENT_FIRST}
 - Verify before you measure. Verify one photo per call, covering all its segments: one verify_segments call per photo
   with a decision for every unverified instance (masks are labelled "#<segment_id> <target> <SAM score>").
   - keep=true only if it really is the target and part of the structure being assessed.
@@ -63,12 +78,12 @@ Rules:
   in the rationale. Inferred work is capped at confidence ${INFERRED_MAX_CONFIDENCE} and is not billable until observed.
 - Open photo requests from earlier visits are listed in the context (open_ask_backs_from_earlier_visits). Do not ask
   for the same item again; request_photo returns the existing open request for an item instead of a new one.
-- Record one assessment per BOQ item with record_assessment. percent_complete is 0–100 and never above 100.
+${fast ? RECORD_BATCH : RECORD_ONE}
   Report a deviation when the evidence shows work out of sequence, a material mismatch, or work not per the BOQ description.
 - Drawings: when an item has drawing_source, planned_qty comes from the drawings. Compare what you see with it in the
   rationale, citing the sheet, e.g. "drawings specify 12 columns (column schedule p.2); 10 visible as cast".
 - Never invent BOQ items, photo ids or segment ids. Only use ids returned by the tools.
-- When every relevant item is assessed or has an open photo request, call finish with a short summary.`;
+- When every relevant item is assessed or has an open photo request, call finish with a short summary.${fast ? " On the fast path, finish in the same turn as your record_assessments call." : ""}`;
 }
 
 /** Sent by the loop when WRAP_UP_TURNS model turns are left. */

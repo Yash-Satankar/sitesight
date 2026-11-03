@@ -194,6 +194,18 @@ function toolCard(step: TraceStepLike, name: string, a: Obj, r: Obj, code: (id: 
           ? `Checked last visit: ${code(a.boq_item_id)} was ${num(r.percent_complete) ?? "?"}%${str(r.stage_reached) ? ` (${r.stage_reached})` : ""}`
           : `Checked last visit: no accepted assessment of ${code(a.boq_item_id)}`,
       };
+    case "record_assessments": {
+      // Each item also has its own record_assessment card; this one just says how the batch went.
+      const recorded = num(r.recorded) ?? 0;
+      const failed = num(r.failed) ?? 0;
+      const errors = (Array.isArray(r.results) ? r.results : []).map(obj).filter((x) => x.ok === false);
+      return {
+        ...base,
+        tone: failed ? "error" : "notice",
+        title: `Recorded ${recorded} assessment${recorded === 1 ? "" : "s"} in one call${failed ? `, ${failed} failed` : ""}`,
+        subtitle: errors.length ? truncateText(errors.map((x) => `${code(x.boq_item_id)}: ${str(x.error) ?? "error"}`).join(" · "), 220) : undefined,
+      };
+    }
     case "finish":
       return { ...base, tone: "notice", title: "Finished", subtitle: str(a.summary) ?? str(r.summary) };
     default:
@@ -213,6 +225,8 @@ function noticeText(name: string | null, p: Obj): { title: string; subtitle?: st
       return { title: "Nudged the agent to keep using tools" };
     case "step_budget":
       return { title: "Stopped: step budget used", subtitle: str(p.message) };
+    case "pre_segmented":
+      return { title: "Photos segmented before the first turn (fast path)", subtitle: str(p.message) };
     default:
       return { title: str(p.message) ?? name ?? "notice" };
   }

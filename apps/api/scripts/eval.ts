@@ -39,6 +39,7 @@ const { values: args } = parseArgs({
     only: { type: "string" },
     "max-cost": { type: "string", default: "10" },
     cases: { type: "string", default: "samples/eval/cases.json" },
+    name: { type: "string" },
     help: { type: "boolean", default: false },
   },
 });
@@ -68,7 +69,8 @@ if (missing.length) {
 }
 
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
-const outDir = join(repoRoot, "samples", "out", "eval", stamp);
+const name = args.name?.replace(/[^\w-]+/g, "-");
+const outDir = join(repoRoot, "samples", "out", "eval", name ? `${stamp}-${name}` : stamp);
 await mkdir(outDir, { recursive: true });
 
 // Before anything imports src/config.ts.
@@ -77,7 +79,7 @@ process.env.STORAGE_LOCAL_DIR = join(outDir, "storage");
 
 const { env } = await import("../src/config.js");
 const { db, schema } = await import("../src/db/client.js");
-const { eq } = await import("drizzle-orm");
+const { and, eq, inArray } = await import("drizzle-orm");
 const { runDryRun } = await import("./dry-run.js");
 const { rasterizePdf } = await import("../src/services/drawings/rasterize.js");
 const { ImportCostMeter } = await import("../src/services/drawings/cost.js");
@@ -89,7 +91,7 @@ const visitCap = env.MAX_COST_PER_VISIT_USD;
 const importCap = env.MAX_COST_PER_DRAWING_IMPORT_USD;
 const records: RunRecord[] = [];
 
-console.log(`SiteSight eval · ${cases.length} case(s) × ${runs} run(s) · cap $${maxCost.toFixed(2)} · model ${env.SPARK_MODEL}`);
+console.log(`SiteSight eval · ${cases.length} case(s) × ${runs} run(s) · cap $${maxCost.toFixed(2)} · model ${env.SPARK_MODEL} · AGENT_FAST_PATH=${env.AGENT_FAST_PATH}`);
 console.log(`Output: ${outDir}\n`);
 
 async function runPhotoCase(c: PhotoCase, run: number, cap: number): Promise<RunRecord> {
@@ -104,6 +106,10 @@ async function runPhotoCase(c: PhotoCase, run: number, cap: number): Promise<Run
   try {
     const summary = await runDryRun({ photosDir, boqPath: fromRoot(c.boq), outDir: runDir, out: log });
     const v = summary.visits[0]!;
+    const runIds = (await db.select({ id: schema.agentRuns.id }).from(schema.agentRuns).where(eq(schema.agentRuns.visitId, v.visitId))).map((r) => r.id);
+    const turns = runIds.length
+      ? (await db.select({ id: schema.agentSteps.id }).from(schema.agentSteps).where(and(inArray(schema.agentSteps.runId, runIds), eq(schema.agentSteps.kind, "model")))).length
+      : 0;
     const photos = await db.select().from(schema.photos).where(eq(schema.photos.visitId, v.visitId)).orderBy(schema.photos.id);
     const label = new Map(photos.map((p, i) => [p.id, basename(c.photos[i] ?? `photo ${p.id}`)]));
     const segs = (
@@ -134,6 +140,7 @@ async function runPhotoCase(c: PhotoCase, run: number, cap: number): Promise<Run
       reason: failed ? (v.error ?? "agent failed") : v.outcome !== "assessed" ? v.outcome : undefined,
       costUsd: v.costUsd,
       latencyMs: Date.now() - started,
+      turns,
       checks,
       rejectNotes,
       detections: output.detections,
@@ -202,7 +209,7 @@ for (const c of cases) {
 }
 
 const date = new Date().toISOString().slice(0, 10);
-const meta = { runsPerCase: runs, model: env.SPARK_MODEL, date, maxCostUsd: maxCost, labelsNote: file.labels_note, outDir };
+const meta = { runsPerCase: runs, model: env.SPARK_MODEL, date, maxCostUsd: maxCost, labelsNote: file.labels_note, outDir, name: name ?? null, fastPath: env.AGENT_FAST_PATH };
 const summary = summarize(records);
 await writeFile(
   join(outDir, "report.json"),

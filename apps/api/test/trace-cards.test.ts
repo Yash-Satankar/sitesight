@@ -117,3 +117,27 @@ describe("GET /visits/:id/trace", () => {
     expect(text).toContain('event: cost\ndata: {"costUsd":0.1123}');
   });
 });
+
+describe("fast path cards", () => {
+  it("summarises a record_assessments batch and names failed items", () => {
+    let id = 0;
+    const step = (kind: TraceStepLike["kind"], name: string | null, payload: unknown) => ({ id: ++id, kind, name, payload }) as TraceStepLike;
+    const cards = buildTraceCards(
+      [
+        step("tool_call", "record_assessments", { items: [{ boq_item_id: 1 }, { boq_item_id: 2 }] }),
+        step("tool_result", "record_assessments", {
+          recorded: 1,
+          failed: 1,
+          results: [
+            { index: 0, boq_item_id: 1, ok: true },
+            { index: 1, boq_item_id: 2, ok: false, error: "percent_complete is required for B." },
+          ],
+        }),
+        step("notice", "pre_segmented", { message: "Segmented 2 photo(s) for column before the first turn; 2 overlay(s) attached." }),
+      ],
+      { itemCode: (n) => (n === 2 ? "B" : "A") },
+    );
+    expect(cards[0]).toMatchObject({ tone: "error", title: "Recorded 1 assessment in one call, 1 failed", subtitle: "B: percent_complete is required for B." });
+    expect(cards[1]).toMatchObject({ title: "Photos segmented before the first turn (fast path)" });
+  });
+});

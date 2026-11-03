@@ -4,7 +4,7 @@ import { db, schema } from "../db/client.js";
 import { functionCallOutput, functionCalls, outputAsInput, respond, type SparkInputItem } from "../meta/spark.js";
 import { assertWithinBudget, CostLimitError } from "../meta/cost.js";
 import { NUDGE, systemPrompt, WRAP_UP } from "./prompts.js";
-import { runTool, toolDefs, type ToolContext } from "./tools.js";
+import { runTool, toolDefsFor, type ToolContext } from "./tools.js";
 import { Tracer } from "./trace.js";
 
 /** `partial`: the model-turn budget ran out before `finish`; recorded assessments are kept. */
@@ -25,17 +25,25 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
   const [run] = await db.insert(schema.agentRuns).values({ visitId }).returning();
   const runId = run!.id;
   const tracer = new Tracer(runId);
-  const ctx: ToolContext = { runId, visitId, projectId: visit.projectId };
+  const fastPath = env.AGENT_FAST_PATH;
+  const ctx: ToolContext = { runId, visitId, projectId: visit.projectId, fastPath };
   await db.update(schema.visits).set({ status: "processing" }).where(eq(schema.visits.id, visitId));
 
   try {
-    const input: SparkInputItem[] = [{ role: "user", content: await buildContext(visitId) }];
+    // Fast path: segment every photo for the BOQ's targets in code before the first turn.
+    const pre = fastPath ? await preSegment(ctx, tracer) : null;
+    const input: SparkInputItem[] = [{ role: "user", content: (await buildContext(visitId)) + (pre ? `\n\n${pre.text}` : "") }];
     const maxTurns = env.MAX_AGENT_STEPS;
     let finished = false;
     let nudged = false;
     let wrapUpSent = false;
     // Index in `input` of the one image message kept per photo (older views are replaced by text).
     const imageMessages = new Map<number, number>();
+    for (const img of pre?.images ?? []) {
+      imageMessages.set(img.photoId, input.length);
+      input.push(imageMessage(img.photoId, img.dataUrl));
+    }
+    const tools = toolDefsFor(fastPath);
 
     for (let turn = 1; turn <= maxTurns && !finished; turn++) {
       const turnsLeft = maxTurns - turn + 1;
@@ -48,7 +56,7 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
       // Don't start a paid call if earlier runs of this visit already used the budget.
       // spark.respond and sam.segment also throw CostLimitError right after the call that crosses it.
       await assertWithinBudget(visitId);
-      const resp = await respond({ instructions: systemPrompt(), input, tools: toolDefs, runId });
+      const resp = await respond({ instructions: systemPrompt({ fastPath }), input, tools, runId });
       const calls = functionCalls(resp);
       await tracer.step("model", null, {
         text: resp.output_text,
@@ -70,9 +78,15 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
 
       const pendingImages: { photoId: number; dataUrl: string }[] = [];
       const compactions: { photoId: number; placeholder: string }[] = [];
+      let batchFailures = 0;
       for (const call of calls) {
         await tracer.step("tool_call", call.name, safeJson(call.arguments));
-        const outcome = await runTool(call.name, call.arguments, ctx);
+        // finish may share a turn with record_assessments, but not when items of that batch failed: they need fixing.
+        const outcome =
+          call.name === "finish" && batchFailures > 0
+            ? { output: { error: `${batchFailures} item(s) in this turn's record_assessments failed. Fix them in another record_assessments call, then finish.` } }
+            : await runTool(call.name, call.arguments, ctx);
+        if (call.name === "record_assessments") batchFailures += Number((outcome.output as { failed?: number }).failed ?? 0);
         await tracer.step("tool_result", call.name, outcome.output);
         for (const ev of outcome.events ?? []) await tracer.step(ev.kind, ev.name, ev.payload);
         // Every call_id must get an output before the next turn, even after `finish`.
@@ -94,13 +108,7 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
             trimmed.push(`replaced older image of photo ${img.photoId}`);
           }
           imageMessages.set(img.photoId, input.length);
-          input.push({
-            role: "user",
-            content: [
-              { type: "input_text" as const, text: `Photo ${img.photoId}:` },
-              { type: "input_image" as const, image_url: img.dataUrl, detail: "auto" as const },
-            ],
-          });
+          input.push(imageMessage(img.photoId, img.dataUrl));
         }
         while (imageMessages.size > env.MAX_IMAGES_IN_CONTEXT) {
           const [photoId, index] = [...imageMessages.entries()].reduce((a, b) => (b[1] < a[1] ? b : a));
@@ -169,6 +177,83 @@ export async function runAgent(visitId: number): Promise<RunOutcome> {
       .where(eq(schema.agentRuns.id, runId));
     throw err;
   }
+}
+
+function imageMessage(photoId: number, dataUrl: string): SparkInputItem {
+  return {
+    role: "user",
+    content: [
+      { type: "input_text" as const, text: `Photo ${photoId}:` },
+      { type: "input_image" as const, image_url: dataUrl, detail: "auto" as const },
+    ],
+  };
+}
+
+/**
+ * Fast path, before the first model turn: segment_photo for every photo x every segment target the BOQ uses
+ * (cached, budget-gated, SAM_CONCURRENCY parallel requests per photo), then the masked overlays of the first
+ * MAX_IMAGES_IN_CONTEXT photos that have instances. Runs through the same tools, so the trace shows each step.
+ * A SAM failure is not fatal: the model can still call segment_photo. Budget overruns abort the run as usual.
+ */
+async function preSegment(ctx: ToolContext, tracer: Tracer): Promise<{ text: string; images: { photoId: number; dataUrl: string }[] }> {
+  const items = await db.select({ targets: schema.boqItems.segmentTargets }).from(schema.boqItems).where(eq(schema.boqItems.projectId, ctx.projectId));
+  const targets = [...new Set(items.flatMap((i) => i.targets ?? []))].sort();
+  const photos = await db.select({ id: schema.photos.id }).from(schema.photos).where(eq(schema.photos.visitId, ctx.visitId)).orderBy(schema.photos.id);
+  if (!targets.length || !photos.length) {
+    return { text: "Pre-segmentation: none needed (no BOQ item has segment targets). Use view_photo for visual items.", images: [] };
+  }
+
+  const perPhoto: { photo_id: number; targets?: unknown; error?: string; overlay?: string }[] = [];
+  const withInstances: number[] = [];
+  for (const p of photos) {
+    const args = { photo_id: p.id, targets };
+    await tracer.step("tool_call", "segment_photo", { ...args, by: "code (fast path)" });
+    const out = await runTool("segment_photo", JSON.stringify(args), ctx); // CostLimitError propagates
+    await tracer.step("tool_result", "segment_photo", out.output);
+    const o = out.output as {
+      error?: string;
+      targets?: { target: string; instance_count: number; instances: { segment_id: number; score: number; area_px: number }[] }[];
+    };
+    if (o.error) {
+      perPhoto.push({ photo_id: p.id, error: o.error });
+      continue;
+    }
+    const summary = (o.targets ?? []).map((t) => ({
+      target: t.target,
+      instance_count: t.instance_count,
+      instances: t.instances.map((i) => ({ segment_id: i.segment_id, score: i.score, area_px: i.area_px })),
+    }));
+    perPhoto.push({ photo_id: p.id, targets: summary });
+    if (summary.some((t) => t.instance_count > 0)) withInstances.push(p.id);
+  }
+
+  const images: { photoId: number; dataUrl: string }[] = [];
+  for (const photoId of withInstances.slice(0, env.MAX_IMAGES_IN_CONTEXT)) {
+    const args = { photo_id: photoId, with_masks: true };
+    await tracer.step("tool_call", "view_photo", { ...args, by: "code (fast path)" });
+    const out = await runTool("view_photo", JSON.stringify(args), ctx);
+    await tracer.step("tool_result", "view_photo", out.output);
+    if (out.images?.length) images.push(...out.images);
+  }
+  const attached = new Set(images.map((i) => i.photoId));
+  for (const e of perPhoto) {
+    if (e.error) continue;
+    e.overlay = attached.has(e.photo_id)
+      ? "attached below (masks labelled #<segment_id> <target> <score>)"
+      : withInstances.includes(e.photo_id)
+        ? "not attached (image limit): call view_photo(with_masks=true) before verifying"
+        : "no instances found";
+  }
+  await tracer.step("notice", "pre_segmented", {
+    message: `Segmented ${photos.length} photo(s) for ${targets.join(", ")} before the first turn; ${images.length} overlay(s) attached.`,
+    photos: photos.length,
+    targets,
+    overlays: images.length,
+  });
+  return {
+    text: `Pre-segmentation (done by code before this turn, fast path) for targets ${targets.join(", ")}:\n${JSON.stringify(perPhoto, null, 2)}`,
+    images,
+  };
 }
 
 /** Everything the model needs up front: zones, BOQ, photos, prior assessments and ask-back answers. */

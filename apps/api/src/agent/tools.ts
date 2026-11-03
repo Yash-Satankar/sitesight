@@ -1,5 +1,5 @@
 import { and, desc, eq, gt, inArray, isNull, ne, or } from "drizzle-orm";
-import type { z } from "zod";
+import { z, array as zArray, object as zObject, unknown as zUnknown } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import sharp from "sharp";
 import {
@@ -32,6 +32,8 @@ export interface ToolContext {
   projectId: number;
   /** draw_panel previews per photo in this run (created on first use). */
   panelPreviews?: Map<number, number>;
+  /** AGENT_FAST_PATH for this run: record_assessments is only available when true. */
+  fastPath?: boolean;
 }
 
 export interface ToolOutcome {
@@ -91,16 +93,29 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     `Record (or overwrite) the progress assessment for one BOQ item in this visit, with evidence. You give percent_complete — or, for staged items, stage_reached (the latest completed stage, or "none"), from which code computes the percent; code computes qty_done (any qty_done you pass is ignored except for count items): area items measured in panel mode → pass panel_measurement_ids (one per bay), qty_done = sum of fractions × panel_planned_qty, capped at planned_qty; visual estimates → percent_complete × planned_qty. Area items without a panel measurement are capped at confidence ${UNMEASURED_AREA_MAX_CONFIDENCE}. Set deviation when the visible material or work differs from the BOQ spec. If progress is lower than the previous accepted assessment, code records that as a deviation.`,
   request_photo:
     "Ask the site engineer for one extra photo when confidence is low. It must be doable with only a phone in 30 seconds, e.g. \"square-on photo of the whole bay between columns C3 and C4, including the beam above and the plinth below\". Never ask for tapes, A4 sheets or any measuring tool.",
+  record_assessments:
+    "Record (or overwrite) assessments for several BOQ items in one call: items is a list of record_assessment arguments, one per BOQ item, with the same rules and caps. Each item is validated and saved on its own; the result lists ok or the error for every item (by index and boq_item_id), so fix and resend only the failed ones. You may call finish in the same turn.",
   finish: "End the run with a short summary once all relevant items are assessed or have an open photo request.",
 };
 
-export const toolDefs: SparkTool[] = TOOL_NAMES.map((name) => {
+/** Tools only offered on the fast path (AGENT_FAST_PATH). */
+const FAST_PATH_TOOLS: readonly ToolName[] = ["record_assessments"];
+
+const allToolDefs: SparkTool[] = TOOL_NAMES.map((name) => {
   const { $schema: _ignored, ...parameters } = zodToJsonSchema(ToolArgs[name], { $refStrategy: "none" }) as Record<
     string,
     unknown
   >;
   return { type: "function", name, description: DESCRIPTIONS[name], parameters, strict: false };
 });
+
+/** The tools offered to the model: the default set, plus record_assessments on the fast path. */
+export function toolDefsFor(fastPath: boolean): SparkTool[] {
+  return fastPath ? allToolDefs : allToolDefs.filter((t) => !FAST_PATH_TOOLS.includes(t.name as ToolName));
+}
+
+/** The default tool set (fast path off). */
+export const toolDefs: SparkTool[] = toolDefsFor(false);
 
 const REFERENCE_CONCEPT: Record<ScaleReference, string> = {
   a4: "A4 sheet of paper",
@@ -109,7 +124,8 @@ const REFERENCE_CONCEPT: Record<ScaleReference, string> = {
 };
 
 export async function runTool(name: string, rawArgs: string, ctx: ToolContext): Promise<ToolOutcome> {
-  if (!(name in ToolArgs)) return { output: { error: `Unknown tool "${name}". Available tools: ${TOOL_NAMES.join(", ")}.` } };
+  const available = TOOL_NAMES.filter((t) => ctx.fastPath || !FAST_PATH_TOOLS.includes(t));
+  if (!available.includes(name as ToolName)) return { output: { error: `Unknown tool "${name}". Available tools: ${available.join(", ")}.` } };
   const tool = name as ToolName;
 
   let json: unknown;
@@ -118,7 +134,8 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolContext): 
   } catch (err) {
     return { output: { error: `Arguments for ${tool} were not valid JSON: ${(err as Error).message}` } };
   }
-  const parsed = ToolArgs[tool].safeParse(json);
+  // record_assessments validates each item on its own (one bad item must not sink the others).
+  const parsed = (tool === "record_assessments" ? BatchShape : ToolArgs[tool]).safeParse(json);
   if (!parsed.success) {
     // Give the model every issue with its exact path so it can fix the call in one go.
     const issues = formatIssues(parsed.error);
@@ -134,6 +151,8 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolContext): 
     return { output: { error: err instanceof Error ? err.message : String(err) } };
   }
 }
+
+const BatchShape = zObject({ items: zArray(zUnknown()).min(1).max(60) });
 
 type Handlers = { [K in ToolName]: (args: ReturnType<(typeof ToolArgs)[K]["parse"]>, ctx: ToolContext) => Promise<ToolOutcome> };
 
@@ -720,6 +739,53 @@ const handlers: Handlers = {
       })
       .returning({ id: schema.askBacks.id });
     return { output: { ask_back_id: ab!.id, status: "open" } };
+  },
+
+  async record_assessments(args, ctx) {
+    const items = args.items as unknown[];
+    const results: { index: number; boq_item_id: number | null; ok: boolean; error?: string; assessment_id?: number; percent_complete?: number; confidence?: number; notes?: string[] }[] = [];
+    const events: NonNullable<ToolOutcome["events"]> = [];
+    // In order: an inferred item may rely on an observed item recorded earlier in the same batch.
+    for (const [index, raw] of items.entries()) {
+      const boqItemId = typeof (raw as { boq_item_id?: unknown })?.boq_item_id === "number" ? (raw as { boq_item_id: number }).boq_item_id : null;
+      const parsed = ToolArgs.record_assessment.safeParse(raw);
+      let output: Record<string, unknown>;
+      if (!parsed.success) {
+        output = { error: `Invalid arguments: ${formatIssues(parsed.error).join("; ")}` };
+      } else {
+        try {
+          output = (await handlers.record_assessment(parsed.data, ctx)).output as Record<string, unknown>;
+        } catch (err) {
+          if (err instanceof CostLimitError) throw err;
+          output = { error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+      // Each item also appears in the trace as its own record_assessment, so the review and live trace stay the same.
+      events.push({ kind: "tool_call", name: "record_assessment", payload: raw }, { kind: "tool_result", name: "record_assessment", payload: output });
+      results.push(
+        typeof output.error === "string"
+          ? { index, boq_item_id: boqItemId, ok: false, error: output.error }
+          : {
+              index,
+              boq_item_id: boqItemId,
+              ok: true,
+              assessment_id: output.assessment_id as number,
+              percent_complete: output.percent_complete as number,
+              confidence: output.confidence as number,
+              ...((output.notes as string[] | undefined)?.length ? { notes: output.notes as string[] } : {}),
+            },
+      );
+    }
+    const failed = results.filter((r) => !r.ok).length;
+    return {
+      output: {
+        recorded: results.length - failed,
+        failed,
+        results,
+        ...(failed ? { next_step: "Fix the failed items and send only those in another record_assessments call before finish." } : {}),
+      },
+      events,
+    };
   },
 
   async finish({ summary }) {

@@ -26,6 +26,7 @@
     "boq-from-drawings": "pnpm --filter @sitesight/api boq-from-drawings",
     "start:prod": "pnpm --filter @sitesight/api start:prod",
     "eval": "pnpm --filter @sitesight/api eval",
+    "eval-compare": "pnpm --filter @sitesight/api eval-compare",
     "readme-shots": "pnpm --filter @sitesight/web readme-shots",
     "seed-prod": "pnpm --filter @sitesight/api seed-prod",
     "prod-photos": "pnpm --filter @sitesight/api prod-photos"

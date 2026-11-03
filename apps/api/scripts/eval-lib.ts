@@ -97,6 +97,8 @@ export interface RunRecord {
   reason?: string;
   costUsd: number;
   latencyMs: number;
+  /** Model turns used by the agent (photo cases). */
+  turns?: number;
   checks: Check[];
   rejectNotes?: { note: string; matched: boolean; example?: string }[];
   detections?: PhotoRunOutput["detections"];
@@ -219,6 +221,7 @@ export interface Summary {
   costUsd: number;
   avgCostPerRunUsd: number | null;
   avgLatencyMs: number | null;
+  avgTurns: number | null;
 }
 
 export function summarize(records: RunRecord[]): Summary {
@@ -251,6 +254,10 @@ export function summarize(records: RunRecord[]): Summary {
     costUsd: round4(records.reduce((s, r) => s + r.costUsd, 0)),
     avgCostPerRunUsd: done.length ? round4(done.reduce((s, r) => s + r.costUsd, 0) / done.length) : null,
     avgLatencyMs: done.length ? Math.round(done.reduce((s, r) => s + r.latencyMs, 0) / done.length) : null,
+    avgTurns: (() => {
+      const t = done.filter((r) => r.turns != null);
+      return t.length ? Math.round((t.reduce((s, r) => s + r.turns!, 0) / t.length) * 10) / 10 : null;
+    })(),
   };
 }
 
@@ -260,7 +267,7 @@ const secs = (ms: number | null) => (ms == null ? "—" : `${(ms / 1000).toFixed
 const usd = (n: number | null) => (n == null ? "—" : `$${n.toFixed(2)}`);
 
 /** Markdown table to paste into the README. */
-export function summaryTable(s: Summary, meta: { runsPerCase: number; cases: number; model: string; date: string }): string {
+export function summaryTable(s: Summary, meta: { runsPerCase: number; cases: number; model: string; date: string; fastPath?: boolean }): string {
   const rows: [string, string][] = [
     ["Stage, exact match", pct(s.stage)],
     ["Count within tolerance", pct(s.count)],
@@ -271,16 +278,17 @@ export function summaryTable(s: Summary, meta: { runsPerCase: number; cases: num
     ["Same answer across runs", s.consistency ? pct(s.consistency) : `— (needs --runs 2+)`],
     ["Cost per run (avg)", usd(s.avgCostPerRunUsd)],
     ["Latency per run (avg)", secs(s.avgLatencyMs)],
+    ["Model turns per run (avg)", s.avgTurns == null ? "—" : String(s.avgTurns)],
     ["Total eval cost", usd(s.costUsd)],
   ];
-  const head = `Eval ${meta.date} · ${meta.cases} cases × ${meta.runsPerCase} run(s) · ${meta.model}${s.runs.failed || s.runs.skipped ? ` · ${s.runs.failed} failed, ${s.runs.skipped} skipped` : ""}`;
+  const head = `Eval ${meta.date} · ${meta.cases} cases × ${meta.runsPerCase} run(s) · ${meta.model}${meta.fastPath != null ? ` · AGENT_FAST_PATH=${meta.fastPath}` : ""}${s.runs.failed || s.runs.skipped ? ` · ${s.runs.failed} failed, ${s.runs.skipped} skipped` : ""}`;
   return [head, "", "| Metric | Result |", "|---|---|", ...rows.map(([a, b]) => `| ${a} | ${b} |`)].join("\n");
 }
 
 export function reportMarkdown(
   records: RunRecord[],
   cases: EvalCase[],
-  meta: { runsPerCase: number; model: string; date: string; maxCostUsd: number; labelsNote: string; outDir: string },
+  meta: { runsPerCase: number; model: string; date: string; maxCostUsd: number; labelsNote: string; outDir: string; fastPath?: boolean },
 ): string {
   const s = summarize(records);
   const lines: string[] = [`# SiteSight eval — ${meta.date}`, "", summaryTable(s, { ...meta, cases: cases.length }), ""];
@@ -291,10 +299,10 @@ export function reportMarkdown(
   for (const c of cases) {
     const rs = records.filter((r) => r.caseId === c.id);
     lines.push(`## ${c.id}`, "", c.description, "");
-    lines.push("| Run | Status | Cost | Latency | Checks passed |", "|---|---|---|---|---|");
+    lines.push("| Run | Status | Cost | Latency | Turns | Checks passed |", "|---|---|---|---|---|---|");
     for (const r of rs) {
       const passed = r.checks.filter((x) => x.pass).length;
-      lines.push(`| ${r.run} | ${r.status}${r.reason ? ` (${r.reason})` : ""} | ${usd(r.costUsd)} | ${secs(r.latencyMs)} | ${r.status === "done" ? `${passed}/${r.checks.length}` : "—"} |`);
+      lines.push(`| ${r.run} | ${r.status}${r.reason ? ` (${r.reason})` : ""} | ${usd(r.costUsd)} | ${secs(r.latencyMs)} | ${r.turns ?? "—"} | ${r.status === "done" ? `${passed}/${r.checks.length}` : "—"} |`);
     }
     lines.push("");
     const done = rs.filter((r) => r.status === "done");
@@ -353,6 +361,97 @@ export class EvalBudget {
   }
 }
 
-export const EVAL_USAGE = `usage: pnpm eval [--runs 3] [--only <id>[,<id>…]] [--max-cost 10] [--cases samples/eval/cases.json]
+export const EVAL_USAGE = `usage: pnpm eval [--runs 3] [--only <id>[,<id>…]] [--max-cost 10] [--cases samples/eval/cases.json] [--name baseline]
 Runs every case through the real agent (in-memory DB) or the drawing import, scores it against the labels, and writes
-samples/out/eval/<time>/report.md + report.json. --max-cost is a hard cap on Meta spend for the whole eval.`;
+samples/out/eval/<time>[-<name>]/report.md + report.json. --max-cost is a hard cap on Meta spend for the whole eval.
+AGENT_FAST_PATH=true in the environment runs the agent fast path.`;
+
+// ---- comparison (pnpm eval-compare) ----
+
+export interface Report {
+  meta: { date: string; runsPerCase: number; model: string; name?: string | null; fastPath?: boolean };
+  records: RunRecord[];
+  summary: Summary;
+}
+
+const rate = (r: Ratio) => (r.total ? r.pass / r.total : null);
+
+/** Accuracy metrics gate the verdict: none may drop. */
+const ACCURACY: { key: "stage" | "count" | "basis" | "rejectNotes"; label: string }[] = [
+  { key: "stage", label: "Stage, exact match" },
+  { key: "count", label: "Count within tolerance" },
+  { key: "basis", label: "Evidence basis correct" },
+  { key: "rejectNotes", label: "False detections caught (labelled)" },
+];
+
+export function compareVerdict(a: Summary, b: Summary): { keep: boolean; drops: string[]; latencyImproved: boolean } {
+  const drops = ACCURACY.filter(({ key }) => {
+    const ra = rate(a[key]);
+    const rb = rate(b[key]);
+    return ra != null && (rb == null || rb < ra - 1e-9);
+  }).map((m) => m.label);
+  if (b.runs.failed > a.runs.failed) drops.push("Failed runs");
+  const latencyImproved = a.avgLatencyMs != null && b.avgLatencyMs != null && b.avgLatencyMs < a.avgLatencyMs;
+  return { keep: !drops.length && latencyImproved, drops, latencyImproved };
+}
+
+export function compareMarkdown(a: Report, b: Report, labels: { a: string; b: string }): string {
+  const sa = a.summary;
+  const sb = b.summary;
+  const delta = (x: number | null, y: number | null, fmt: (n: number) => string) =>
+    x == null || y == null ? "" : ` (${y - x >= 0 ? "+" : "−"}${fmt(Math.abs(y - x))}, ${x ? `${y - x >= 0 ? "+" : "−"}${Math.round((Math.abs(y - x) / x) * 100)}%` : "—"})`;
+  const rows: [string, string, string][] = [
+    ...ACCURACY.map(({ key, label }) => [label, pct(sa[key]), pct(sb[key])] as [string, string, string]),
+    [
+      "SAM detections rejected by the agent",
+      sa.detections.total ? `${sa.detections.rejected}/${sa.detections.total}` : "—",
+      sb.detections.total ? `${sb.detections.rejected}/${sb.detections.total}` : "—",
+    ],
+    ["Same answer across runs", sa.consistency ? pct(sa.consistency) : "—", sb.consistency ? pct(sb.consistency) : "—"],
+    ["Runs done / failed / skipped", `${sa.runs.done} / ${sa.runs.failed} / ${sa.runs.skipped}`, `${sb.runs.done} / ${sb.runs.failed} / ${sb.runs.skipped}`],
+    ["Model turns per run (avg)", sa.avgTurns == null ? "—" : String(sa.avgTurns), `${sb.avgTurns ?? "—"}${delta(sa.avgTurns, sb.avgTurns, (n) => n.toFixed(1))}`],
+    ["Latency per run (avg)", secs(sa.avgLatencyMs), `${secs(sb.avgLatencyMs)}${delta(sa.avgLatencyMs, sb.avgLatencyMs, (n) => `${(n / 1000).toFixed(0)} s`)}`],
+    ["Cost per run (avg)", usd4(sa.avgCostPerRunUsd), `${usd4(sb.avgCostPerRunUsd)}${delta(sa.avgCostPerRunUsd, sb.avgCostPerRunUsd, (n) => `$${n.toFixed(3)}`)}`],
+    ["Total eval cost", usd(sa.costUsd), usd(sb.costUsd)],
+  ];
+  const v = compareVerdict(sa, sb);
+  const lines = [
+    `# Eval comparison: ${labels.a} vs ${labels.b}`,
+    "",
+    `${labels.a}: ${a.meta.date}, ${a.meta.runsPerCase} run(s) per case, AGENT_FAST_PATH=${a.meta.fastPath ?? false} · ${labels.b}: ${b.meta.date}, ${b.meta.runsPerCase} run(s) per case, AGENT_FAST_PATH=${b.meta.fastPath ?? false}`,
+    "",
+    `| Metric | ${labels.a} | ${labels.b} |`,
+    "|---|---|---|",
+    ...rows.map(([m, x, y]) => `| ${m} | ${x} | ${y} |`),
+    "",
+    "## Per case (averages over completed runs)",
+    "",
+    `| Case | Checks passed (${labels.a} → ${labels.b}) | Turns | Latency | Cost |`,
+    "|---|---|---|---|---|",
+  ];
+  const caseIds = [...new Set([...a.records, ...b.records].map((r) => r.caseId))];
+  const avg = (rs: RunRecord[], f: (r: RunRecord) => number | undefined) => {
+    const xs = rs.map(f).filter((x): x is number => x != null);
+    return xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null;
+  };
+  for (const id of caseIds) {
+    const ra = a.records.filter((r) => r.caseId === id && r.status === "done");
+    const rb = b.records.filter((r) => r.caseId === id && r.status === "done");
+    const checks = (rs: RunRecord[]) => `${rs.reduce((s, r) => s + r.checks.filter((c) => c.pass).length, 0)}/${rs.reduce((s, r) => s + r.checks.length, 0)}`;
+    const fmt = (x: number | null, f: (n: number) => string) => (x == null ? "—" : f(x));
+    lines.push(
+      `| ${id} | ${checks(ra)} → ${checks(rb)} | ${fmt(avg(ra, (r) => r.turns), (n) => n.toFixed(1))} → ${fmt(avg(rb, (r) => r.turns), (n) => n.toFixed(1))} | ${fmt(avg(ra, (r) => r.latencyMs), (n) => `${(n / 1000).toFixed(0)} s`)} → ${fmt(avg(rb, (r) => r.latencyMs), (n) => `${(n / 1000).toFixed(0)} s`)} | ${fmt(avg(ra, (r) => r.costUsd), (n) => `$${n.toFixed(3)}`)} → ${fmt(avg(rb, (r) => r.costUsd), (n) => `$${n.toFixed(3)}`)} |`,
+    );
+  }
+  lines.push(
+    "",
+    "## Verdict",
+    "",
+    v.keep
+      ? `Keep ${labels.b}: no accuracy metric dropped and latency improved.`
+      : `Do not switch to ${labels.b}: ${[...(v.drops.length ? [`accuracy dropped on ${v.drops.join(", ")}`] : []), ...(v.latencyImproved ? [] : ["latency did not improve"])].join("; ")}.`,
+  );
+  return lines.join("\n");
+}
+
+const usd4 = (n: number | null) => (n == null ? "—" : `$${n.toFixed(3)}`);

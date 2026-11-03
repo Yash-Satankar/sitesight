@@ -30,6 +30,12 @@ const Env = z.object({
   VISUAL_ONLY_MAX_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.7),
   SAM_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(3), // parallel SAM requests per segment() call
   MAX_IMAGES_IN_CONTEXT: z.coerce.number().int().min(1).default(3), // images kept in the agent conversation (oldest dropped)
+  // Agent fast path (off by default): pre-segment every photo for the BOQ's segment targets before the first turn,
+  // and offer record_assessments (batch) + finish in the same turn.
+  AGENT_FAST_PATH: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
 
   // BOQ from drawings
   MAX_COST_PER_DRAWING_IMPORT_USD: z.coerce.number().positive().default(1.0),

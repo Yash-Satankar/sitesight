@@ -72,6 +72,36 @@ export const PanelSpecArg = z.union([
 ]);
 export type PanelSpecArg = z.infer<typeof PanelSpecArg>;
 
+/** One assessment, as record_assessment takes it and as each item of record_assessments. */
+export const RecordAssessmentArgs = z.object({
+  boq_item_id: z.number().int(),
+  percent_complete: z.number().min(0).max(100).optional().describe("Required for items without stages."),
+  basis: EvidenceBasis.default("observed").describe(
+    "observed (default): visible in this visit's photos. inferred: hidden earlier-sequence work deduced from an item observed in this visit; name that item in the rationale. Not billable until observed.",
+  ),
+  stage_reached: z
+    .string()
+    .optional()
+    .describe("Staged items only: name of the latest COMPLETED stage, or \"none\". Code computes the percent."),
+  qty_done: z.number().nonnegative().optional(),
+  panel_measurement_id: z
+    .number()
+    .int()
+    .optional()
+    .describe("From measure(mode='panel'), for a single bay. Prefer panel_measurement_ids."),
+  panel_measurement_ids: z
+    .array(z.number().int())
+    .min(1)
+    .optional()
+    .describe("One measure(mode='panel') result per bay. qty_done = sum of fractions × panel_planned_qty, computed by code."),
+  confidence: z.number().min(0).max(1),
+  rationale: z.string().min(1),
+  evidence: z
+    .array(z.object({ photo_id: z.number().int(), segment_ids: z.array(z.number().int()).default([]).describe("Omit or [] for photo-only evidence.") }))
+    .min(1),
+  deviation: z.string().optional(),
+});
+
 // Tool argument schemas. Every tool call is validated against these before its handler runs.
 export const ToolArgs = {
   list_boq_items: z.object({ zone_id: z.number().int().optional() }),
@@ -129,33 +159,10 @@ export const ToolArgs = {
       else ["segment_ids", "reference"].forEach((f) => need(f as keyof typeof a));
     }),
   get_previous_assessment: z.object({ boq_item_id: z.number().int() }),
-  record_assessment: z.object({
-    boq_item_id: z.number().int(),
-    percent_complete: z.number().min(0).max(100).optional().describe("Required for items without stages."),
-    basis: EvidenceBasis.default("observed").describe(
-      "observed (default): visible in this visit's photos. inferred: hidden earlier-sequence work deduced from an item observed in this visit; name that item in the rationale. Not billable until observed.",
-    ),
-    stage_reached: z
-      .string()
-      .optional()
-      .describe("Staged items only: name of the latest COMPLETED stage, or \"none\". Code computes the percent."),
-    qty_done: z.number().nonnegative().optional(),
-    panel_measurement_id: z
-      .number()
-      .int()
-      .optional()
-      .describe("From measure(mode='panel'), for a single bay. Prefer panel_measurement_ids."),
-    panel_measurement_ids: z
-      .array(z.number().int())
-      .min(1)
-      .optional()
-      .describe("One measure(mode='panel') result per bay. qty_done = sum of fractions × panel_planned_qty, computed by code."),
-    confidence: z.number().min(0).max(1),
-    rationale: z.string().min(1),
-    evidence: z
-      .array(z.object({ photo_id: z.number().int(), segment_ids: z.array(z.number().int()).default([]).describe("Omit or [] for photo-only evidence.") }))
-      .min(1),
-    deviation: z.string().optional(),
+  record_assessment: RecordAssessmentArgs,
+  // Fast path only (AGENT_FAST_PATH): every item is validated and recorded on its own; per-item results come back.
+  record_assessments: z.object({
+    items: z.array(RecordAssessmentArgs).min(1).max(60).describe("One entry per BOQ item, each exactly as record_assessment takes it."),
   }),
   request_photo: z.object({
     zone_id: z.number().int(),

@@ -22,6 +22,7 @@
     "boq-from-drawings": "tsx scripts/boq-from-drawings.ts",
     "start:prod": "node --import tsx src/prod.ts",
     "eval": "tsx scripts/eval.ts",
+    "eval-compare": "tsx scripts/eval-compare.ts",
     "seed-prod": "tsx scripts/seed-prod.ts",
     "prod-photos": "tsx scripts/prod-photos.ts"
   },

@@ -111,7 +111,7 @@ pnpm boq-from-drawings --pdf drawings.pdf [--out samples/out/drawings] [--max-co
 `pnpm eval` runs labelled cases ([samples/eval/cases.json](samples/eval/cases.json)) through the real agent (photo cases,
 in-memory DB) and the drawing import (drawing cases), and scores them: stage exact-match, count within tolerance,
 evidence basis, drawing totals, how many SAM detections the agent rejected (and whether the labelled false positives
-were among them), consistency across runs, cost and latency. Report: `samples/out/eval/<time>/report.md` + `report.json`;
+were among them), consistency across runs, model turns, cost and latency. Report: `samples/out/eval/<time>/report.md` + `report.json`;
 the console ends with a table to paste here.
 
 ```sh
@@ -119,7 +119,15 @@ pnpm eval                 # every case once
 pnpm eval --runs 3        # consistency
 pnpm eval --only demo-residence-drawings
 pnpm eval --max-cost 5    # hard cap on Meta spend for the whole eval (default $10)
+pnpm eval --runs 3 --name baseline                       # → samples/out/eval/<time>-baseline/
+AGENT_FAST_PATH=true pnpm eval --runs 3 --name fast-path
+pnpm eval-compare samples/out/eval/<a>/report.json samples/out/eval/<b>/report.json   # side by side + verdict
 ```
+
+`AGENT_FAST_PATH=true` (off by default) segments every photo for the BOQ's segment targets in code before the first
+model turn, puts the instances and the masked overlays in the starting context, and adds `record_assessments` (all
+items in one call, each validated on its own) with `finish` allowed in the same turn. `eval-compare` recommends keeping
+it only if no accuracy metric drops and latency improves.
 
 Each run's own cap is shrunk to what is left of `--max-cost`, so a run can overshoot it by at most one model call; runs
 are skipped once it is spent. The labels in `cases.json` are drafts to be confirmed by the site engineer.
