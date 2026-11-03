@@ -2,6 +2,7 @@ import { ilike, inArray, sql as dsql } from "drizzle-orm";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db/client.js";
 import { deleteObject } from "./storage.js";
+import { viewKeyOf } from "./drawings/redact.js";
 
 export interface DeletedProject {
   projectId: number;
@@ -38,6 +39,9 @@ export async function deleteProject(projectId: number, opts: { deleteFiles?: boo
     const reports = await db.select({ key: schema.reports.storageKey }).from(schema.reports).where(inArray(schema.reports.visitId, visitIds));
     for (const r of reports) keys.add(r.key);
   }
+
+  const pages = await db.select().from(schema.drawingPages).where(eq(schema.drawingPages.projectId, projectId));
+  for (const p of pages) for (const k of [p.storageKey, viewKeyOf(p.storageKey), p.thumbKey]) keys.add(k);
 
   await db.transaction(async (tx) => {
     if (visitIds.length) {

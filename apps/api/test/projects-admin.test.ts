@@ -42,6 +42,8 @@ async function fullProject(name: string) {
   });
   await db.insert(schema.reports).values({ visitId: v!.id, storageKey: `${name}/report.pdf` });
   await db.insert(schema.jobs).values({ kind: "agent_run", payload: { visitId: v!.id } });
+  const [imp] = await db.insert(schema.drawingImports).values({ projectId: p!.id, fileName: "set.pdf" }).returning();
+  await db.insert(schema.drawingPages).values({ projectId: p!.id, importId: imp!.id, pageNo: 1, storageKey: `${name}/page.png`, thumbKey: `${name}/thumb.png`, width: 1, height: 1 });
   return { projectId: p!.id, visitId: v!.id };
 }
 
@@ -56,9 +58,9 @@ describe("deleteProject", () => {
 
     const result = await deleteProject(doomed.projectId, { deleteFiles: true });
 
-    expect(result).toMatchObject({ projectId: doomed.projectId, visits: 1, storageKeys: 4, filesDeleted: 4 });
+    expect(result).toMatchObject({ projectId: doomed.projectId, visits: 1, storageKeys: 7, filesDeleted: 7 });
     expect(deleted.sort()).toEqual(
-      ["photo.jpg", "voice.webm", "mask.png", "report.pdf"].map((f) => `Demo Residence (e2e 20261029-0500)/${f}`).sort(),
+      ["photo.jpg", "voice.webm", "mask.png", "report.pdf", "page.png", "page.view.png", "thumb.png"].map((f) => `Demo Residence (e2e 20261029-0500)/${f}`).sort(),
     );
     for (const table of [schema.projects, schema.zones, schema.boqItems, schema.visits]) {
       const rows = await db.select().from(table as typeof schema.projects);
@@ -74,7 +76,7 @@ describe("deleteProject", () => {
   it("leaves files alone unless asked, and returns null for unknown projects", async () => {
     deleted.length = 0;
     const p = await fullProject("Temp (e2e x)");
-    expect(await deleteProject(p.projectId)).toMatchObject({ filesDeleted: 0, storageKeys: 4 });
+    expect(await deleteProject(p.projectId)).toMatchObject({ filesDeleted: 0, storageKeys: 7 });
     expect(deleted).toEqual([]);
     expect(await deleteProject(999_999)).toBeNull();
   });

@@ -121,8 +121,18 @@ if (drawing) {
   await settle();
   const file = join(outDir, "drawing-import.png");
   const shot = await page.screenshot({ fullPage: false });
+  // Only thumbnails actually visible: skip ones off screen or covered (e.g. by the fixed Save bar).
   const thumbs = await page.locator("img[src*='/storage/'][src*='thumbs']").evaluateAll((els) =>
-    els.map((e) => e.getBoundingClientRect()).filter((r) => r.bottom > 0 && r.top < innerHeight && r.width > 0).map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })),
+    els
+      .filter((e) => {
+        const r = e.getBoundingClientRect();
+        if (r.width === 0 || r.bottom <= 0 || r.top >= innerHeight || r.right <= 0 || r.left >= innerWidth) return false;
+        const x = Math.min(Math.max(r.left + r.width / 2, 1), innerWidth - 1);
+        const y = Math.min(Math.max(r.top + r.height / 2, 1), innerHeight - 1);
+        return document.elementFromPoint(x, y) === e;
+      })
+      .map((e) => e.getBoundingClientRect())
+      .map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })),
   );
   await writeBlurred(shot, thumbs, 2, file);
   saved.push(`${file}  (${thumbs.length} thumbnail(s) with title blocks blurred)`);

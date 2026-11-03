@@ -237,6 +237,14 @@ describe("POST /projects/:id/drawings + import job", () => {
     ]);
     const thumbKey = body.pages[0].thumbUrl.replace("/storage/", "");
     expect((await sharp(store.get(thumbKey)!).metadata()).width).toBe(480);
+    // People only ever get the title-block-blurred copy; the original stays in storage for the model.
+    const viewKey = body.pages[0].imageUrl.replace("/storage/", "");
+    expect(viewKey).toMatch(/\.view\.png$/);
+    expect(store.has(viewKey)).toBe(true);
+    const [row] = await db.select().from(schema.drawingPages).where(eq(schema.drawingPages.importId, body.id)).orderBy(schema.drawingPages.pageNo);
+    expect(store.has(row!.storageKey)).toBe(true);
+    expect(body.pages[0].imageUrl).not.toBe(`/storage/${row!.storageKey}`);
+    expect(body.pages[0].thumbUrl).not.toBe(`/storage/${row!.storageKey}`);
     const jobs = await db.select().from(schema.jobs).where(eq(schema.jobs.kind, "drawing_import"));
     expect(jobs.map((j) => j.payload)).toEqual([{ importId: body.id }]);
   });

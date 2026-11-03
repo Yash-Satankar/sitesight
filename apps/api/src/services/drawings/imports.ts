@@ -10,21 +10,25 @@ import { assembleProposal, runActions } from "./assemble.js";
 import { recordSpend } from "../../meta/cost.js";
 import { ImportCostMeter } from "./cost.js";
 import { rasterizePdf } from "./rasterize.js";
+import { redactTitleBlocks, viewKeyOf } from "./redact.js";
 import { isStructural, runPipeline, type PageState } from "./pipeline.js";
 
 export const DRAWING_MAX_BYTES = 25 * 1024 * 1024;
 export const PAGE_MAX_EDGE = 2000;
 const THUMB_EDGE = 480;
 
-/** Rasterise the PDF, store each page (PNG + thumbnail), record the import and queue the Spark work. */
+/** Rasterise the PDF, store each page (original, title-block-blurred copy, thumbnail), record the import, queue the Spark work. */
 export async function createDrawingImport(projectId: number, fileName: string, pdf: Buffer): Promise<number> {
   const pages = await rasterizePdf(pdf, { maxEdge: PAGE_MAX_EDGE, maxPages: env.DRAWING_MAX_PAGES });
   const [imp] = await db.insert(schema.drawingImports).values({ projectId, fileName }).returning();
   for (const p of pages) {
     const storageKey = newKey(`projects/${projectId}/drawings/${imp!.id}`, "image/png");
     const thumbKey = newKey(`projects/${projectId}/drawings/${imp!.id}/thumbs`, "image/png");
-    const thumb = await sharp(p.png).resize({ width: THUMB_EDGE, height: THUMB_EDGE, fit: "inside" }).png().toBuffer();
+    // The original is for the model only (it reads title-block notes); people see a copy with the title block blurred.
+    const view = (await redactTitleBlocks(p.png)).png;
+    const thumb = await sharp(view).resize({ width: THUMB_EDGE, height: THUMB_EDGE, fit: "inside" }).png().toBuffer();
     await putObject(storageKey, p.png, "image/png");
+    await putObject(viewKeyOf(storageKey), view, "image/png");
     await putObject(thumbKey, thumb, "image/png");
     await db.insert(schema.drawingPages).values({ projectId, importId: imp!.id, pageNo: p.pageNo, storageKey, thumbKey, width: p.width, height: p.height });
   }
@@ -111,7 +115,8 @@ export async function loadDrawingImport(projectId: number, importId: number): Pr
         width: p.width,
         height: p.height,
         error: p.error,
-        imageUrl: await presignGet(p.storageKey),
+        // Never the original: client name and address are in the title block.
+        imageUrl: await presignGet(viewKeyOf(p.storageKey)),
         thumbUrl: await presignGet(p.thumbKey),
       })),
     ),
