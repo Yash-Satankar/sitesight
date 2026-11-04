@@ -24,8 +24,8 @@ models and site scanning that a G+2 residential job doesn't have.
 
 ## Demo
 
-- **Live:** https://sitesightapi-production.up.railway.app (password in the submission form)
-- **Video:** [_link to be added_](https://youtu.be/dWrZL39qX_Q)
+- **Live:** https://sitesightapi-production.up.railway.app (password: `uDtJ8x-ztZx5S-YNq2TT-0RInUk`)
+- **Video:** https://youtu.be/dWrZL39qX_Q
 
 **Try it in 60 seconds:** log in → **Demo Residence** → **visit 2** → watch the live trace replay, see "+40 pts" in
 the visit summary, open the PDF. Then **Plinth-stage site** and **G+2 frame site** → the traces show SAM detections
