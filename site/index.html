@@ -15,8 +15,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <script>
-    // Paste the YouTube link here when the demo video is published (watch URL or youtu.be link).
-    const VIDEO_URL = "";
+    const VIDEO_URL = "https://youtu.be/dWrZL39qX_Q";
   </script>
 </head>
 <body>
@@ -92,7 +91,15 @@
     <section class="wrap section" id="evaluation">
       <h2>Evaluation</h2>
       <!-- EVAL:START (filled by `node site/update-eval.mjs` from the newest human-labelled eval report; never edit numbers by hand) -->
-      <p class="muted">Evaluation results coming soon: the labelled cases are being confirmed by a site engineer.</p>
+      <p class="muted">9 human-labelled cases × 3 runs, real site photos, muse-spark-1.3 (eval of 2026-11-04).</p>
+      <table class="eval"><tbody>
+      <tr><td>Stage, exact match</td><td>83% <span class="muted">(20/24)</span></td></tr>
+      <tr><td>Count within tolerance</td><td>100% <span class="muted">(3/3)</span></td></tr>
+      <tr><td>Evidence basis correct</td><td>93% <span class="muted">(53/57)</span></td></tr>
+      <tr><td>False detections caught (labelled)</td><td>25% <span class="muted">(3/12)</span></td></tr>
+      <tr><td>Same answer across runs</td><td>93% <span class="muted">(26/28)</span></td></tr>
+      <tr><td>Cost per visit (avg)</td><td>$0.13</td></tr>
+      </tbody></table>
       <!-- EVAL:END -->
     </section>
 
