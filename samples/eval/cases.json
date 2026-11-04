@@ -27,7 +27,7 @@
           ]
         }
       ],
-      "labelled_by": "draft"
+      "labelled_by": "human"
     },
     {
       "id": "demo-residence-v2-slab-cast",
@@ -63,7 +63,7 @@
           ]
         }
       ],
-      "labelled_by": "draft"
+      "labelled_by": "human"
     },
     {
       "id": "cages-no-cast-columns",
@@ -94,7 +94,7 @@
           ]
         }
       ],
-      "labelled_by": "draft"
+      "labelled_by": "human"
     },
     {
       "id": "frame-behind-scaffolding",
@@ -123,7 +123,7 @@
           ]
         }
       ],
-      "labelled_by": "draft"
+      "labelled_by": "human"
     },
     {
       "id": "demo-residence-drawings",
@@ -140,6 +140,175 @@
         }
       },
       "labelled_by": "draft"
+    },
+    {
+      "id": "demo-residence-whatsapp-image-2026-10-24-at-3-35-50-pm",
+      "kind": "photos",
+      "description": "Labelled by the site engineer (WhatsApp Image 2026-10-24 at 3.35.50 PM.jpeg).",
+      "photos": [
+        "samples/WhatsApp Image 2026-10-24 at 3.35.50 PM.jpeg"
+      ],
+      "boq": "samples/boq-demo-residence.json",
+      "expected": {
+        "PB-1": {
+          "basis": "inferred",
+          "tolerance": 0
+        },
+        "SLB-GF": {
+          "stage": "concreting",
+          "basis": "observed",
+          "tolerance": 0
+        }
+      },
+      "should_reject": [],
+      "labelled_by": "human",
+      "observations": {
+        "FTG-1": "not built or not in view",
+        "COL-GF": "columns not visible"
+      }
+    },
+    {
+      "id": "demo-residence-whatsapp-image-2026-10-24-at-3-35-51-pm",
+      "kind": "photos",
+      "description": "Labelled by the site engineer (WhatsApp Image 2026-10-24 at 3.35.51 PM.jpeg).",
+      "photos": [
+        "samples/WhatsApp Image 2026-10-24 at 3.35.51 PM.jpeg"
+      ],
+      "boq": "samples/boq-demo-residence.json",
+      "expected": {
+        "FTG-1": {
+          "basis": "inferred",
+          "tolerance": 0
+        },
+        "PB-1": {
+          "basis": "inferred",
+          "tolerance": 0
+        },
+        "SLB-GF": {
+          "stage": "concreting",
+          "basis": "observed",
+          "tolerance": 0
+        }
+      },
+      "should_reject": [],
+      "labelled_by": "human",
+      "observations": {}
+    },
+    {
+      "id": "demo-residence-whatsapp-image-2026-10-24-at-3-35-53-pm-1",
+      "kind": "photos",
+      "description": "Labelled by the site engineer (WhatsApp Image 2026-10-24 at 3.35.53 PM (1).jpeg).",
+      "photos": [
+        "samples/WhatsApp Image 2026-10-24 at 3.35.53 PM (1).jpeg"
+      ],
+      "boq": "samples/boq-demo-residence.json",
+      "expected": {
+        "FTG-1": {
+          "basis": "inferred",
+          "tolerance": 0
+        },
+        "PB-1": {
+          "basis": "inferred",
+          "tolerance": 0
+        },
+        "SLB-GF": {
+          "stage": "concreting",
+          "basis": "observed",
+          "tolerance": 0
+        }
+      },
+      "should_reject": [
+        {
+          "note": "neighbouring buildings are not part of this site",
+          "keywords": [
+            "neighbour",
+            "neighbor",
+            "adjacent",
+            "background",
+            "other building"
+          ]
+        }
+      ],
+      "labelled_by": "human",
+      "observations": {
+        "COL-GF": "columns not visible"
+      }
+    },
+    {
+      "id": "demo-residence-whatsapp-image-2026-10-24-at-3-35-53-pm",
+      "kind": "photos",
+      "description": "Labelled by the site engineer (WhatsApp Image 2026-10-24 at 3.35.53 PM.jpeg).",
+      "photos": [
+        "samples/WhatsApp Image 2026-10-24 at 3.35.53 PM.jpeg"
+      ],
+      "boq": "samples/boq-demo-residence.json",
+      "expected": {
+        "FTG-1": {
+          "basis": "inferred",
+          "tolerance": 0
+        },
+        "PB-1": {
+          "basis": "observed",
+          "tolerance": 0
+        },
+        "SLB-GF": {
+          "stage": "concreting",
+          "basis": "observed",
+          "tolerance": 0
+        }
+      },
+      "should_reject": [
+        {
+          "note": "neighbouring buildings are not part of this site",
+          "keywords": [
+            "neighbour",
+            "neighbor",
+            "adjacent",
+            "background",
+            "other building"
+          ]
+        }
+      ],
+      "labelled_by": "human",
+      "observations": {}
+    },
+    {
+      "id": "demo-residence-whatsapp-image-2026-10-24-at-3-35-54-pm",
+      "kind": "photos",
+      "description": "Labelled by the site engineer (WhatsApp Image 2026-10-24 at 3.35.54 PM.jpeg).",
+      "photos": [
+        "samples/WhatsApp Image 2026-10-24 at 3.35.54 PM.jpeg"
+      ],
+      "boq": "samples/boq-demo-residence.json",
+      "expected": {
+        "FTG-1": {
+          "basis": "inferred",
+          "tolerance": 0
+        },
+        "PB-1": {
+          "basis": "inferred",
+          "tolerance": 0
+        },
+        "SLB-GF": {
+          "stage": "reinforcement",
+          "basis": "observed",
+          "tolerance": 0
+        }
+      },
+      "should_reject": [
+        {
+          "note": "neighbouring buildings are not part of this site",
+          "keywords": [
+            "neighbour",
+            "neighbor",
+            "adjacent",
+            "background",
+            "other building"
+          ]
+        }
+      ],
+      "labelled_by": "human",
+      "observations": {}
     }
   ]
 }
