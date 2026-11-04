@@ -1,0 +1,10 @@
+{
+  "name": "sitesight-demo-video-tools",
+  "private": true,
+  "type": "module",
+  "description": "Local-only tooling for pnpm demo-video (ffmpeg binary). Not part of the pnpm workspace.",
+  "dependencies": {
+    "ffmpeg-static": "5.2.0",
+    "kokoro-js": "^1.2.1"
+  }
+}

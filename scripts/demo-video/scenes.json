@@ -1,0 +1,284 @@
+{
+  "_note": "Every input path for pnpm demo-video lives here (paths are relative to the repo root). Rename photos here only.",
+  "inputs": {
+    "drawingsPdf": "samples/demo-residence.pdf",
+    "photos": {
+      "slabMesh": "samples/demo-residence/v1/WhatsApp Image 2026-10-28 at 11.21.26 AM.jpeg",
+      "slabCast": "samples/demo-residence/v2/WhatsApp Image 2026-10-28 at 11.21.45 AM.jpeg",
+      "rebarCages": "samples/run2/WhatsApp Image 2026-10-24 at 3.35.51 PM (1).jpeg",
+      "g2Scaffolding": "samples/run1/WhatsApp Image 2026-10-24 at 3.35.50 PM (1).jpeg"
+    },
+    "voiceWav": "samples/out/video/voice-note.wav",
+    "problemPhotos": [
+      "samples/run1/WhatsApp Image 2026-10-24 at 3.35.50 PM (1).jpeg",
+      "samples/run2/WhatsApp Image 2026-10-24 at 3.35.51 PM (1).jpeg",
+      "samples/demo-residence/v2/WhatsApp Image 2026-10-28 at 11.21.45 AM.jpeg"
+    ]
+  },
+  "voiceNoteText": "Ground floor slab steel is tied, shuttering done.",
+  "outDir": "samples/out/video",
+  "evalDir": "samples/out/eval",
+  "spendCapUsd": 3,
+  "agentFastPath": false,
+  "ports": {
+    "api": 8790,
+    "postgres": 5440
+  },
+  "links": {
+    "app": "https://sitesightapi-production.up.railway.app",
+    "repo": "https://github.com/Yash-Satankar/sitesight"
+  },
+  "projects": {
+    "demo": {
+      "name": "Demo Residence",
+      "location": "Pune, MH",
+      "zone": "GF"
+    },
+    "plinth": {
+      "name": "Plinth-stage site",
+      "location": "Pune, MH",
+      "zone": "GF",
+      "boq": [
+        {
+          "code": "PB-1",
+          "description": "RCC plinth beams, ground floor",
+          "unit": "lot",
+          "plannedQty": 1,
+          "measureMode": "visual_only",
+          "segmentTargets": [],
+          "sequenceNo": 1
+        },
+        {
+          "code": "COL-GF",
+          "description": "RCC columns, ground floor (cast concrete)",
+          "unit": "nos",
+          "plannedQty": 14,
+          "measureMode": "count",
+          "segmentTargets": [
+            "column"
+          ],
+          "sequenceNo": 2
+        },
+        {
+          "code": "WALL-GF",
+          "description": "230 mm clay brickwork in CM 1:6, ground floor",
+          "unit": "m2",
+          "plannedQty": 120,
+          "measureMode": "visual_only",
+          "segmentTargets": [],
+          "sequenceNo": 3
+        }
+      ]
+    },
+    "g2": {
+      "name": "G+2 frame site",
+      "location": "Pune, MH",
+      "zone": "Front",
+      "boq": [
+        {
+          "code": "PB-1",
+          "description": "RCC plinth beams",
+          "unit": "lot",
+          "plannedQty": 1,
+          "measureMode": "visual_only",
+          "segmentTargets": [],
+          "sequenceNo": 1
+        },
+        {
+          "code": "COL-GF",
+          "description": "RCC columns, ground floor",
+          "unit": "nos",
+          "plannedQty": 12,
+          "measureMode": "count",
+          "segmentTargets": [
+            "column"
+          ],
+          "sequenceNo": 2
+        },
+        {
+          "code": "SLB-GF",
+          "description": "Ground-floor roof slab, 125 mm RCC",
+          "unit": "lot",
+          "plannedQty": 1,
+          "measureMode": "visual_only",
+          "segmentTargets": [],
+          "sequenceNo": 3,
+          "stages": [
+            {
+              "name": "shuttering",
+              "weight": 0.2
+            },
+            {
+              "name": "reinforcement",
+              "weight": 0.4
+            },
+            {
+              "name": "concreting",
+              "weight": 0.4
+            }
+          ]
+        },
+        {
+          "code": "BWK-FF",
+          "description": "First-floor brick masonry walls, 230 mm",
+          "unit": "m2",
+          "plannedQty": 85,
+          "measureMode": "area",
+          "segmentTargets": [
+            "brickwork"
+          ],
+          "sequenceNo": 4
+        }
+      ]
+    }
+  },
+  "scenes": [
+    {
+      "n": 1,
+      "id": "title",
+      "kind": "card",
+      "slot": 5,
+      "voiceover": "SiteSight."
+    },
+    {
+      "n": 2,
+      "id": "problem",
+      "kind": "card",
+      "slot": 15,
+      "voiceover": "Small contractors track progress with WhatsApp photos and Excel. Every running bill becomes an argument about what's actually built."
+    },
+    {
+      "n": 3,
+      "id": "drawings",
+      "kind": "desktop",
+      "slot": 26,
+      "voiceover": "It starts from the architect's drawings. Muse Spark reads the structural sheets and proposes the bill of quantities — every number traced to its page.",
+      "polish": {
+        "trimStart": 0.8,
+        "callout": {
+          "text": "12 columns · 10 footings — read from the drawings, every number traced to a page",
+          "at": "afterWait"
+        },
+        "zoom": {
+          "at": "afterWait+9",
+          "dur": 4.5,
+          "x": 0.47,
+          "y": 0.72,
+          "z": 1.6
+        }
+      }
+    },
+    {
+      "n": 4,
+      "id": "visit1",
+      "kind": "phone",
+      "slot": 9.0,
+      "voiceover": "On site, the engineer just takes photos and talks.",
+      "polish": {
+        "trimStart": 0.8,
+        "callout": {
+          "text": "Photo + voice note, straight from the phone",
+          "at": 2.0
+        },
+        "cutTail": 7.1
+      }
+    },
+    {
+      "n": 5,
+      "id": "plinth",
+      "kind": "phone",
+      "slot": 26,
+      "voiceover": "SAM 3.1 finds candidate elements. Muse Spark checks every one and rejects what isn't real — like rebar cages that aren't cast columns.",
+      "polish": {
+        "trimStart": 0.8,
+        "callout": {
+          "text": "SAM 3.1 detects · Muse Spark verifies",
+          "at": "event:segment"
+        },
+        "panels": true
+      }
+    },
+    {
+      "n": 6,
+      "id": "g2",
+      "kind": "phone",
+      "slot": 20,
+      "voiceover": "When it can't see enough, it asks for a specific photo instead of guessing.",
+      "polish": {
+        "trimStart": 0.8,
+        "callout": {
+          "text": "Unsure? It asks for a specific photo",
+          "at": "event:ask"
+        },
+        "panels": true
+      }
+    },
+    {
+      "n": 7,
+      "id": "visit2",
+      "kind": "phone",
+      "slot": 22,
+      "voiceover": "Next visit, the slab is cast. It compares against its own last assessment.",
+      "polish": {
+        "trimStart": 0.8,
+        "callout": {
+          "text": "Slab: reinforcement 60% → concreting 100%  (+40 pts)",
+          "at": "afterWait+2"
+        },
+        "zoom": {
+          "at": "afterWait+2.5",
+          "dur": 4.0,
+          "x": 0.62,
+          "y": 0.52,
+          "z": 1.5
+        },
+        "cuts": [
+          [
+            115.9,
+            116.8
+          ]
+        ]
+      }
+    },
+    {
+      "n": 8,
+      "id": "review",
+      "kind": "desktop",
+      "slot": 20,
+      "voiceover": "Anything it only inferred stays out of the bill until a photo proves it. The engineer reviews, and the report is ready for billing.",
+      "polish": {
+        "trimStart": 0.6,
+        "callout": {
+          "text": "Inferred work stays out of the bill",
+          "at": 1.2
+        },
+        "zoom": {
+          "at": 1.4,
+          "dur": 3.4,
+          "x": 0.33,
+          "y": 0.16,
+          "z": 1.8
+        }
+      }
+    },
+    {
+      "n": 9,
+      "id": "results",
+      "kind": "card",
+      "slot": 10,
+      "voiceover": "Evaluated on real site photos, at a few cents per visit."
+    },
+    {
+      "n": 10,
+      "id": "end",
+      "kind": "card",
+      "slot": 4.8,
+      "voiceover": "Built on Muse Spark and SAM 3.1. Open source."
+    }
+  ],
+  "voice": {
+    "default": "kokoro",
+    "kokoroVoice": "am_michael",
+    "kokoroSpeed": 1.0
+  }
+}
