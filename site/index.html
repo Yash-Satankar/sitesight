@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SiteSight — construction progress from phone photos</title>
+  <meta name="description" content="Open-source agent on Muse Spark and SAM 3.1: architect's drawings and site photos in, a bill-ready progress report out — every quantity traced to a photo or a drawing page.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="SiteSight — construction progress, measured from phone photos">
+  <meta property="og:description" content="Drawings and site photos in, a bill-ready progress report out. Built on Muse Spark and SAM 3.1. Open source.">
+  <meta property="og:image" content="https://yash-satankar.github.io/sitesight/images/og.jpg">
+  <meta property="og:url" content="https://yash-satankar.github.io/sitesight/">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#0f766e">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // Paste the YouTube link here when the demo video is published (watch URL or youtu.be link).
+    const VIDEO_URL = "";
+  </script>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="./"><img src="favicon.svg" alt="" width="28" height="28">SiteSight</a>
+      <nav>
+        <a href="#how">How it works</a>
+        <a href="#evaluation">Evaluation</a>
+        <a href="https://github.com/Yash-Satankar/sitesight">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <p class="eyebrow">Open source · built on Muse Spark and SAM 3.1</p>
+      <h1>Construction progress, measured from phone photos.</h1>
+      <p class="sub">Architect's drawings and site photos in, a bill-ready progress report out — every quantity traced to a photo or a drawing page.</p>
+      <div class="actions">
+        <a class="btn" id="watch" href="#demo">Watch the 2-minute demo</a>
+        <a class="btn btn-secondary" href="https://github.com/Yash-Satankar/sitesight">View on GitHub</a>
+      </div>
+      <p class="note">The live app is password-protected for the hackathon judges.</p>
+      <div class="demo" id="demo" hidden>
+        <div class="video"><iframe id="player" title="SiteSight demo video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>
+      </div>
+      <figure class="hero-shot">
+        <picture>
+          <source media="(max-width: 600px)" srcset="images/hero-mobile.webp" width="800" height="800">
+          <img src="images/hero.webp" width="1600" height="900" alt="A site visit on the phone next to the SAM 3.1 detections: Muse Spark has rejected 14 of them, each marked with a red box and a reason such as tarp, plastered wall or neighbouring building.">
+        </picture>
+      </figure>
+    </section>
+
+    <section class="wrap shots" aria-label="Screenshots">
+      <figure>
+        <img src="images/trace-rejections.webp" width="410" height="890" loading="lazy" alt="Live agent trace on the phone: a SAM detection rejected as a rebar cage, not a cast column.">
+        <figcaption>The live trace: every SAM detection is checked, and rejected ones say why.</figcaption>
+      </figure>
+      <figure>
+        <img src="images/drawing-import.webp" width="780" height="1688" loading="lazy" alt="Drawing import: 14 pages read, a proposed BOQ with the source pages for each quantity.">
+        <figcaption>Drawings to BOQ: each quantity comes with the page it was read from.</figcaption>
+      </figure>
+      <figure>
+        <img src="images/review-card.webp" width="716" height="1114" loading="lazy" alt="Review card: footings at 100%, marked inferred and not billable, with the evidence photo.">
+        <figcaption>Review: inferred work is marked and stays out of the bill.</figcaption>
+      </figure>
+    </section>
+
+    <section class="wrap section">
+      <h2>Running bills, argued line by line</h2>
+      <div class="grid four">
+        <div class="card"><h3>WhatsApp photos, no structure</h3><p>Hundreds of site photos a month, in a chat, tied to nothing.</p></div>
+        <div class="card"><h3>Excel BOQs nobody updates</h3><p>The bill of quantities lives in a spreadsheet that drifts from the site.</p></div>
+        <div class="card"><h3>Disputes over what's built</h3><p>Every running bill turns into "8 columns or 10?" with no shared evidence.</p></div>
+        <div class="card"><h3>Enterprise tools don't fit</h3><p>360° cameras, BIM models and site scans aren't there on a G+2 house.</p></div>
+      </div>
+    </section>
+
+    <section class="wrap section" id="how">
+      <h2>What SiteSight does</h2>
+      <div class="grid three">
+        <div class="card"><h3>Drawings → BOQ</h3><p>Muse Spark reads the structural sheets; code assembles the BOQ. Anything the drawings don't state is marked "needs input".</p></div>
+        <div class="card"><h3>SAM detects, Muse Spark verifies</h3><p>SAM 3.1 finds columns and brickwork; Muse Spark rejects scaffolding, rebar cages, tarps and neighbours before anything is counted.</p></div>
+        <div class="card"><h3>Stages, not guesses</h3><p>Staged items are judged by the latest completed stage (shuttering → reinforcement → concreting); code turns that into a percentage.</p></div>
+        <div class="card"><h3>Asks for the photo it needs</h3><p>When it can't see enough, it requests one specific, phone-only photo instead of guessing.</p></div>
+        <div class="card"><h3>Observed vs inferred</h3><p>Hidden work deduced from what's visible is listed separately and never billed until a photo shows it.</p></div>
+        <div class="card"><h3>Bill-ready PDF</h3><p>The engineer accepts, edits or undoes each item; the report lists evidence photos with the masks that were counted.</p></div>
+      </div>
+    </section>
+
+    <section class="wrap section" id="evaluation">
+      <h2>Evaluation</h2>
+      <!-- EVAL:START (filled by `node site/update-eval.mjs` from the newest human-labelled eval report; never edit numbers by hand) -->
+      <p class="muted">Evaluation results coming soon: the labelled cases are being confirmed by a site engineer.</p>
+      <!-- EVAL:END -->
+    </section>
+
+    <section class="wrap section">
+      <h2>Built with Meta</h2>
+      <div class="grid three">
+        <div class="card"><h3>Muse Spark</h3><p>Runs the agent: looks at photos, verifies detections, decides stages, writes rationales, asks for photos, and reads drawing sheets into strict JSON.</p></div>
+        <div class="card"><h3>SAM 3.1</h3><p>Segments every column and brick wall in a photo, with masks and scores, so progress is counted instead of eyeballed.</p></div>
+        <div class="card"><h3>Muse Voice Transcribe</h3><p>Turns the engineer's voice note on a photo into text the agent reads as context.</p></div>
+      </div>
+    </section>
+
+    <section class="wrap section two-col">
+      <div>
+        <h2>Honest limitations</h2>
+        <ul class="list">
+          <li><strong>Perspective.</strong> A wall bay's built share is measured in image pixels; an angled photo over- or under-states the far side. The agent asks for square-on photos, but doesn't correct for it.</li>
+          <li><strong>SAM is weak on rebar and slabs,</strong> so those are judged visually by Muse Spark, with confidence capped.</li>
+          <li><strong>Inferred items are a judgement call.</strong> They stay out of the bill, but the engineer still has to confirm them.</li>
+        </ul>
+      </div>
+      <div>
+        <h2>Roadmap</h2>
+        <ul class="list">
+          <li><strong>WhatsApp intake:</strong> forward site photos to a number instead of opening the app.</li>
+          <li><strong>Hindi and Marathi</strong> voice notes.</li>
+          <li><strong>Rate-based billing:</strong> BOQ rates × measured quantities → the running bill itself.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="wrap section">
+      <h2>Run your own</h2>
+      <div class="grid three">
+        <div class="card"><h3>Deploy</h3><p>One Railway service with Postgres and a volume. <a href="https://github.com/Yash-Satankar/sitesight/blob/main/DEPLOY.md">DEPLOY.md</a></p></div>
+        <div class="card"><h3>Develop</h3><p>Local stack, seed data, agent dry runs and the eval harness. <a href="https://github.com/Yash-Satankar/sitesight/blob/main/DEVELOPMENT.md">DEVELOPMENT.md</a></p></div>
+        <div class="card"><h3>Open source</h3><p>MIT licensed. Bring your own Meta Model API key; spend is capped per visit and per day.</p></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <span>SiteSight · MIT</span>
+      <a href="https://github.com/Yash-Satankar/sitesight">Source</a>
+      <span class="muted">Built for the Meta Global AI Developer Hackathon 2026</span>
+    </div>
+  </footer>
+
+  <script>
+    // Demo button: embed the video when VIDEO_URL is set; otherwise say it's coming.
+    (function () {
+      var btn = document.getElementById("watch");
+      var id = (VIDEO_URL.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{11})/) || [])[1];
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        var box = document.getElementById("demo");
+        if (!id) {
+          btn.textContent = "Demo video coming soon";
+          return;
+        }
+        document.getElementById("player").src = "https://www.youtube-nocookie.com/embed/" + id + "?autoplay=1&rel=0";
+        box.hidden = false;
+        box.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    })();
+  </script>
+</body>
+</html>

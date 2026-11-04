@@ -3,6 +3,8 @@
 Architect's drawings and phone photos in, a bill-ready progress report out — an agent built on Muse Spark and SAM 3.1
 measures construction progress per BOQ item, with evidence an engineer can check.
 
+**Website:** https://yash-satankar.github.io/sitesight/
+
 | Live trace: detections checked and rejected | Drawing import with page sources | Review card |
 |---|---|---|
 | ![Agent trace with rejected detections](docs/img/trace-rejections.png) | ![Drawing import: proposed BOQ with source pages](docs/img/drawing-import.png) | ![Review card with masks on the evidence photo](docs/img/review-card.png) |
